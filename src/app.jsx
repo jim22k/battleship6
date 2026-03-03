@@ -366,13 +366,10 @@ function App() {
       // Auto-advance selected ship to next unplaced (nice)
       const nextShip = Object.keys(SHIPS).find((k) => !placed[k]) ?? ship;
 
-      const allPlacedNow = Object.keys(SHIPS).every((k) => !!placed[k]);
-      const nextMode = allPlacedNow ? "RECORD_SHOTS" : prev.mode;
-
       return {
         ...prev,
         ships,
-        mode: nextMode,
+        // Stay in PLACE_SHIPS until user explicitly clicks Start Game
         ui: { ...prev.ui, placement: { ...prev.ui.placement, selectedShip: nextShip } },
       };
     });
@@ -551,7 +548,7 @@ function App() {
 
                 <button
                   className="btn"
-                  onClick={() => setMode(allShipsPlaced ? "RECORD_SHOTS" : "PLACE_SHIPS")}
+                  onClick={() => setMode("RECORD_SHOTS")}
                   disabled={!allShipsPlaced}
                   title={allShipsPlaced ? "Start recording shots" : "Place all ships first"}
                 >
