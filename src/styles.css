@@ -233,6 +233,13 @@ a { color: inherit; }
   border: 1px solid rgba(255,255,255,0.16);
 }
 
+/* Ship mark red when that segment is hit */
+.cell .shipMark.hit {
+  color: rgba(255, 120, 120, 0.98);
+  border-color: rgba(255, 120, 120, 0.55);
+  background: rgba(255, 60, 60, 0.18);
+}
+
 .cell .highlightOverlay {
   position: absolute;
   inset: 0;
@@ -294,6 +301,18 @@ a { color: inherit; }
   background: rgba(255,255,255,0.04);
   border-radius: 14px;
   padding: 10px;
+}
+
+/* Top (main) player visual differentiation */
+.playerCard.mainPlayer {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* Read-only hit boxes look */
+.hitInput[readonly] {
+  opacity: 0.85;
+  cursor: default;
 }
 
 .playerHeader {

@@ -111,6 +111,37 @@ function makeInitialState() {
   };
 }
 
+function computeMainPlayerDamage(shipsPlaced, shotsByCell) {
+  const damage = {
+    A: Array(SHIPS.A.length).fill(""),
+    B: Array(SHIPS.B.length).fill(""),
+    C: Array(SHIPS.C.length).fill(""),
+    D: Array(SHIPS.D.length).fill(""),
+    S: Array(SHIPS.S.length).fill(""),
+  };
+
+  for (const letter of Object.keys(SHIPS)) {
+    const placed = shipsPlaced[letter];
+    if (!placed || !Array.isArray(placed.cells)) continue;
+
+    // Hits are shots on any cell occupied by this ship
+    const hits = [];
+    placed.cells.forEach((id, idx) => {
+      const r = shotsByCell[id];
+      if (r != null) hits.push({ round: Number(r), idx });
+    });
+
+    // Stable order: round asc, then ship-cell order asc
+    hits.sort((a, b) => (a.round - b.round) || (a.idx - b.idx));
+
+    for (let i = 0; i < Math.min(hits.length, damage[letter].length); i++) {
+      damage[letter][i] = String(hits[i].round);
+    }
+  }
+
+  return damage;
+}
+
 function tryLoadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -270,6 +301,10 @@ function App() {
 
     return { cells: candidate, valid: true };
   }, [hoverCell, state.mode, state.ui.placement, state.ships.byCell, state.ships.placed]);
+
+  const mainPlayerDamage = React.useMemo(() => {
+    return computeMainPlayerDamage(state.ships.placed, state.shotsByCell);
+  }, [state.ships.placed, state.shotsByCell]);
 
   function toggleHighlightRound(r) {
     setState((prev) => {
@@ -614,15 +649,25 @@ function App() {
         <div className="card">
           <h2>Players</h2>
           <div className="players">
-            {state.players.map((p, idx) => (
-              <PlayerCard
-                key={p.id}
-                idx={idx}
-                player={p}
-                onNameChange={(v) => updatePlayerName(idx, v)}
-                onDamageChange={(ship, hitIdx, v) => updatePlayerDamage(idx, ship, hitIdx, v)}
-              />
-            ))}
+            {state.players.map((p, idx) => {
+              const isMain = idx === 0;
+
+              const playerForRender = isMain
+                ? { ...p, damage: mainPlayerDamage }
+                : p;
+
+              return (
+                <PlayerCard
+                  key={p.id}
+                  idx={idx}
+                  player={playerForRender}
+                  isMainPlayer={isMain}
+                  readOnlyDamage={isMain}
+                  onNameChange={(v) => updatePlayerName(idx, v)}
+                  onDamageChange={(ship, hitIdx, v) => updatePlayerDamage(idx, ship, hitIdx, v)}
+                />
+              );
+            })}
           </div>
         </div>
       </div>
@@ -699,7 +744,9 @@ function BoardGrid({
                 onClick={() => onCellClick(r, c)}
                 onMouseEnter={() => onCellHover(r, c)}
               >
-                {ship ? <div className="shipMark">{ship}</div> : null}
+                {ship ? (
+                  <div className={`shipMark ${shotRound != null ? "hit" : ""}`}>{ship}</div>
+                ) : null}
                 {shotRound != null ? <div className="shotNumber">{shotRound}</div> : null}
 
                 {isHighlighted ? (
@@ -723,14 +770,14 @@ function BoardGrid({
   );
 }
 
-function PlayerCard({ idx, player, onNameChange, onDamageChange }) {
+function PlayerCard({ idx, player, isMainPlayer, readOnlyDamage, onNameChange, onDamageChange }) {
   const sunk = (shipLetter) => {
     const arr = player.damage[shipLetter] || [];
     return arr.length > 0 && arr.every((v) => v !== "");
   };
 
   return (
-    <div className="playerCard">
+    <div className={`playerCard ${isMainPlayer ? "mainPlayer" : ""}`}>
       <div className="playerHeader">
         <div className="idx">{idx + 1}</div>
         <input
@@ -755,8 +802,16 @@ function PlayerCard({ idx, player, onNameChange, onDamageChange }) {
                 pattern="\d*"
                 placeholder="__"
                 value={val}
-                onChange={(e) => onDamageChange(letter, i, e.target.value)}
-                title={`${letter} hit ${i + 1} (2 digits)`}
+                readOnly={!!readOnlyDamage}
+                onChange={(e) => {
+                  if (readOnlyDamage) return;
+                  onDamageChange(letter, i, e.target.value);
+                }}
+                title={
+                  readOnlyDamage
+                    ? `${letter} hits (auto-calculated)`
+                    : `${letter} hit ${i + 1} (2 digits)`
+                }
               />
             ))}
           </div>
