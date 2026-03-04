@@ -225,12 +225,11 @@ a { color: inherit; }
   left: 7px;
   font-size: 12px;
   font-weight: 900;
-  color: rgba(255,255,255,0.9);
-  opacity: 0.9;
+  color: rgba(223, 197, 247, 0.85);
   padding: 2px 6px;
   border-radius: 999px;
-  background: rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(88, 28, 135, 0.35);
+  border: 1px solid rgba(168, 85, 247, 0.85);
 }
 
 /* Ship mark red when that segment is hit */
@@ -305,8 +304,10 @@ a { color: inherit; }
 
 /* Top (main) player visual differentiation */
 .playerCard.mainPlayer {
-  background: rgba(255, 255, 255, 0.075);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(88, 28, 135, 0.35);          /* deep purple fill */
+  border-color: rgba(168, 85, 247, 0.85);       /* bright purple border */
+  box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.35),
+              0 8px 24px rgba(88, 28, 135, 0.35);
 }
 
 /* Read-only hit boxes look */
