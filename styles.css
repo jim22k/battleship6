@@ -16,6 +16,7 @@ body {
     "Segoe UI Emoji";
   background: radial-gradient(1200px 800px at 20% 0%, #1a2250 0%, var(--bg) 55%);
   color: var(--text);
+  min-width: 840px;
 }
 
 a { color: inherit; }
