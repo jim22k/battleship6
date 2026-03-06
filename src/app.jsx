@@ -500,7 +500,7 @@ function App() {
 
   const modeTag = state.mode === "PLACE_SHIPS"
     ? { text: "SHIP PLACEMENT", cls: "warn" }
-    : { text: "RECORDING SHOTS", cls: "ok" };
+    : { text: "RECORDING SHOTS", cls: "warn" };
 
   return (
     <div className="app">
@@ -540,10 +540,8 @@ function App() {
 
       <div className="main">
         <div className="card">
-          <h2>Board</h2>
-
+          {state.mode === "PLACE_SHIPS" &&
           <div className="controls">
-            {state.mode === "PLACE_SHIPS" ? (
               <>
                 <div className="badge">
                   <div className="label">Ship</div>
@@ -575,14 +573,8 @@ function App() {
                   </select>
                 </div>
 
-                <div className="helperText">
-                  Click a cell to place the selected ship. If it was already placed, it will move.
-                  {" "}
-                  Ships can be horizontal, vertical, or diagonal. No overlap.
-                </div>
-
                 <button
-                  className="btn"
+                  className={allShipsPlaced ? "btn primary" : "btn"}
                   onClick={() => setMode("RECORD_SHOTS")}
                   disabled={!allShipsPlaced}
                   title={allShipsPlaced ? "Start recording shots" : "Place all ships first"}
@@ -590,41 +582,33 @@ function App() {
                   Start Game
                 </button>
               </>
-            ) : (
-              <>
-                <div className="helperText">
-                  Click an empty cell to record a shot for the <b>Recording</b> round.
-                  Click again to remove <b>only if that cell was recorded in the Recording round</b>.
-                  Cells targeted in other rounds cannot be changed from here—switch Recording round.
-                </div>
-              </>
-            )}
-          </div>
+          </div>}
 
           <div className="gridWrap">
             <div>
-              <div className="helperText" style={{ marginBottom: 8 }}>
-                Toggle highlight rounds:
-              </div>
-              <div className="pills">
-                {Array.from({ length: maxRoundSeen }, (_, i) => i + 1).map((r) => {
-                  const on = highlightsSet.has(r);
-                  const style = on
-                    ? { background: colorForRound(r), borderColor: "rgba(255,255,255,0.35)" }
-                    : undefined;
-                  return (
-                    <div
-                      key={r}
-                      className={`pill ${on ? "on" : ""} ${r === state.rounds.current ? "current" : ""}`}
-                      style={style}
-                      onClick={() => toggleHighlightRound(r)}
-                      title="Toggle highlight"
-                    >
-                      {r}
-                    </div>
-                  );
-                })}
-              </div>
+              {state.mode === "RECORD_SHOTS" &&
+              <>
+                <div className="pills">
+                  <div className="helperText">Round: </div>
+                  {Array.from({ length: maxRoundSeen }, (_, i) => i + 1).map((r) => {
+                    const on = highlightsSet.has(r);
+                    const style = on
+                      ? { background: colorForRound(r), borderColor: "rgba(255,255,255,0.35)" }
+                      : undefined;
+                    return (
+                      <div
+                        key={r}
+                        className={`pill ${on ? "on" : ""} ${r === state.rounds.current ? "current" : ""}`}
+                        style={style}
+                        onClick={() => toggleHighlightRound(r)}
+                        title="Toggle highlight"
+                      >
+                        {r}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>}
             </div>
 
             <BoardGrid
@@ -639,10 +623,6 @@ function App() {
               onCellLeave={clearHover}
             />
 
-            <div className="footerNote">
-              Row labels use NATO words (Alpha…Juliette). Columns are 1–10.
-              Ship markers are shown as small corner letters; shot rounds are shown large.
-            </div>
           </div>
         </div>
 
