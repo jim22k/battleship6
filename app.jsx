@@ -505,42 +505,8 @@ function App() {
   return (
     <div className="app">
       <div className="topbar">
-        <div className="badge">
-          <div className="label">Round</div>
-          <div className="value">{state.rounds.current}</div>
-        </div>
 
-        <button className="btn primary" onClick={nextRound} title="Increment the current round">
-          Next Round
-        </button>
-
-        <div className="badge" title="New shots will be recorded to this round">
-          <div className="label">Recording</div>
-          <select
-            className="select"
-            value={state.rounds.recording}
-            onChange={(e) => setRecordingRound(Number(e.target.value))}
-          >
-            {Array.from({ length: maxRoundSeen }, (_, i) => i + 1).map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <span className={`modeTag ${modeTag.cls}`}>{modeTag.text}</span>
-
-        <div className="spacer" />
-
-        <button className="btn danger" onClick={clearAll}>
-          Clear All Data
-        </button>
-      </div>
-
-      <div className="main">
-        <div className="card">
-          {state.mode === "PLACE_SHIPS" &&
+        {state.mode === "PLACE_SHIPS" ? (
           <div className="controls">
               <>
                 <div className="badge">
@@ -573,17 +539,64 @@ function App() {
                   </select>
                 </div>
 
-                <button
-                  className={allShipsPlaced ? "btn primary" : "btn"}
-                  onClick={() => setMode("RECORD_SHOTS")}
-                  disabled={!allShipsPlaced}
-                  title={allShipsPlaced ? "Start recording shots" : "Place all ships first"}
-                >
-                  Start Game
-                </button>
-              </>
-          </div>}
 
+              </>
+          </div>
+          ) : (
+          <>
+            <div className="badge">
+              <div className="label">Round</div>
+              <div className="value">{state.rounds.current}</div>
+            </div>
+
+            <button className="btn primary" onClick={nextRound} title="Increment the current round">
+              Next Round
+            </button>
+
+            <div className="badge" title="New shots will be recorded to this round">
+              <div className="label">Recording</div>
+              <select
+                className="select"
+                value={state.rounds.recording}
+                onChange={(e) => setRecordingRound(Number(e.target.value))}
+              >
+                {Array.from({ length: maxRoundSeen }, (_, i) => i + 1).map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+          )
+        }
+
+
+
+
+        <span className={`modeTag ${modeTag.cls}`}>{modeTag.text}</span>
+
+        <div className="spacer" />
+
+        {state.mode === "PLACE_SHIPS" &&
+          <button
+            className={allShipsPlaced ? "btn primary" : "btn"}
+            style={{ fontSize: 18 }}
+            onClick={() => setMode("RECORD_SHOTS")}
+            disabled={!allShipsPlaced}
+            title={allShipsPlaced ? "Start recording shots" : "Place all ships first"}
+          >
+            Start Game
+          </button>
+        }
+
+        <button className="btn danger" onClick={clearAll}>
+          Clear All Data
+        </button>
+      </div>
+
+      <div className="main">
+        <div className="card">
           <div className="gridWrap">
             <div>
               {state.mode === "RECORD_SHOTS" &&
