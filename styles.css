@@ -164,7 +164,7 @@ a {
   }
 }
 
-@media (min-width: 1500px) {
+@media (min-width: 1470px) {
   .main.crowdedPlayers {
     grid-template-columns: minmax(0, 1fr) clamp(470px, 34vw, 640px);
   }
@@ -205,7 +205,7 @@ a {
 
 .grid {
   display: grid;
-  grid-template-columns: 140px repeat(10, minmax(44px, 1fr));
+  grid-template-columns: 100px repeat(10, minmax(44px, 1fr));
   gap: 6px;
   align-items: stretch;
   min-width: 680px;
@@ -580,7 +580,7 @@ a {
     flex: 0 0 218px;
   }
 
-  .badge {
+  .topbar .controls .badge {
     width: 100%;
   }
 }
