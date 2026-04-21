@@ -1,7 +1,13 @@
 /* global React, ReactDOM */
 
 const LS_KEY = "battleship_recorder_v1";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+
+const MODES = {
+  SETUP_PLAYERS: "SETUP_PLAYERS",
+  PLACE_SHIPS: "PLACE_SHIPS",
+  RECORD_SHOTS: "RECORD_SHOTS",
+};
 
 const ROW_WORDS = [
   "Alpha",
@@ -32,18 +38,18 @@ const ORIENTATIONS = {
 };
 
 const ROUND_COLORS = [
-  "#7dd3fc", // sky
-  "#fda4af", // rose
-  "#c4b5fd", // violet
-  "#86efac", // green
-  "#fcd34d", // amber
-  "#f9a8d4", // pink
-  "#a7f3d0", // mint
-  "#93c5fd", // blue
-  "#fdba74", // orange
-  "#e9d5ff", // lavender
-  "#bef264", // lime
-  "#fecaca", // light red
+  "#7dd3fc",
+  "#fda4af",
+  "#c4b5fd",
+  "#86efac",
+  "#fcd34d",
+  "#f9a8d4",
+  "#a7f3d0",
+  "#93c5fd",
+  "#fdba74",
+  "#e9d5ff",
+  "#bef264",
+  "#fecaca",
 ];
 
 function clamp(n, lo, hi) {
@@ -51,46 +57,41 @@ function clamp(n, lo, hi) {
 }
 
 function cellId(r, c) {
-  // r: 0..9, c: 1..10
   return `${r}-${c}`;
-}
-
-function parseCellId(id) {
-  const [rs, cs] = id.split("-");
-  return { r: Number(rs), c: Number(cs) };
 }
 
 function colorForRound(r) {
   return ROUND_COLORS[(r - 1) % ROUND_COLORS.length];
 }
 
-function makeDefaultPlayers() {
-  const mkDamage = () => ({
-    A: Array(SHIPS.A.length).fill(""),
-    B: Array(SHIPS.B.length).fill(""),
-    C: Array(SHIPS.C.length).fill(""),
-    D: Array(SHIPS.D.length).fill(""),
-    S: Array(SHIPS.S.length).fill(""),
-  });
+function makeEmptyDamage() {
+  return Object.fromEntries(Object.keys(SHIPS).map((letter) => [letter, Array(SHIPS[letter].length).fill("")]));
+}
 
+function makeDefaultPlayers() {
   return Array.from({ length: 6 }, (_, i) => ({
     id: `p${i + 1}`,
     name: "",
-    damage: mkDamage(),
+    damage: makeEmptyDamage(),
   }));
 }
 
 function makeInitialState() {
   return {
     version: SCHEMA_VERSION,
-    mode: "PLACE_SHIPS", // PLACE_SHIPS | RECORD_SHOTS
+    mode: MODES.SETUP_PLAYERS,
+    setup: {
+      playerCount: 2,
+      userPlayerId: null,
+    },
     rounds: {
       current: 1,
       recording: 1,
-      highlights: [], // array of numbers (persistable)
+      highlights: [],
+      playerByRound: {},
     },
-    shotsByCell: {}, // { [cellId]: roundNumber }
-    shotsByRound: {}, // { [roundNumber]: [cellId...] }
+    shotsByCell: {},
+    shotsByRound: {},
     ships: {
       placed: {
         A: null,
@@ -99,7 +100,7 @@ function makeInitialState() {
         D: null,
         S: null,
       },
-      byCell: {}, // { [cellId]: shipLetter }
+      byCell: {},
     },
     ui: {
       placement: {
@@ -111,42 +112,268 @@ function makeInitialState() {
   };
 }
 
-function computeMainPlayerDamage(shipsPlaced, shotsByCell) {
-  const damage = {
-    A: Array(SHIPS.A.length).fill(""),
-    B: Array(SHIPS.B.length).fill(""),
-    C: Array(SHIPS.C.length).fill(""),
-    D: Array(SHIPS.D.length).fill(""),
-    S: Array(SHIPS.S.length).fill(""),
+function normalizeDamageTrack(track, expectedLength) {
+  const filled = (Array.isArray(track) ? track : [])
+    .filter((v) => v !== "")
+    .map((v) => String(v))
+    .sort((a, b) => Number(a) - Number(b));
+
+  return [...filled, ...Array(Math.max(0, expectedLength - filled.length)).fill("")].slice(0, expectedLength);
+}
+
+function normalizeDamageMap(damage) {
+  return Object.fromEntries(
+    Object.keys(SHIPS).map((letter) => [letter, normalizeDamageTrack(damage?.[letter], SHIPS[letter].length)])
+  );
+}
+
+function normalizePlayer(rawPlayer, idx) {
+  return {
+    id: rawPlayer?.id || `p${idx + 1}`,
+    name: typeof rawPlayer?.name === "string" ? rawPlayer.name : "",
+    damage: normalizeDamageMap(rawPlayer?.damage),
   };
+}
+
+function inferPlayerCount(players) {
+  let lastNamedIdx = -1;
+  players.forEach((player, idx) => {
+    if (player.name.trim()) lastNamedIdx = idx;
+  });
+  return clamp(lastNamedIdx + 1 || 2, 2, 6);
+}
+
+function getActivePlayers(players, playerCount) {
+  return players.slice(0, clamp(playerCount, 2, 6));
+}
+
+function buildShipsByCell(placed) {
+  const byCell = {};
+  for (const [letter, info] of Object.entries(placed)) {
+    if (!info || !Array.isArray(info.cells)) continue;
+    for (const id of info.cells) byCell[id] = letter;
+  }
+  return byCell;
+}
+
+function rebuildShotsByCellFromRounds(shotsByRound) {
+  const rebuilt = {};
+  for (const [rk, arr] of Object.entries(shotsByRound || {})) {
+    const round = Number(rk);
+    if (!Number.isFinite(round) || !Array.isArray(arr)) continue;
+    for (const id of arr) rebuilt[id] = round;
+  }
+  return rebuilt;
+}
+
+function rebuildShotsByRoundFromCells(shotsByCell) {
+  const rebuilt = {};
+  for (const [id, round] of Object.entries(shotsByCell || {})) {
+    const roundNum = Number(round);
+    if (!Number.isFinite(roundNum)) continue;
+    if (!rebuilt[roundNum]) rebuilt[roundNum] = [];
+    rebuilt[roundNum].push(id);
+  }
+  return rebuilt;
+}
+
+function inferRoundAssignments(maxRound, activePlayers) {
+  const playerByRound = {};
+  if (!activePlayers.length) return playerByRound;
+
+  for (let round = 1; round <= maxRound; round += 1) {
+    playerByRound[round] = activePlayers[(round - 1) % activePlayers.length].id;
+  }
+
+  return playerByRound;
+}
+
+function migrateLegacyState(legacy) {
+  const base = makeInitialState();
+  const normalizedPlayers = (Array.isArray(legacy.players) ? legacy.players : makeDefaultPlayers()).map(normalizePlayer);
+  const playerCount = inferPlayerCount(normalizedPlayers);
+  const allShipsPlaced = Object.keys(SHIPS).every((letter) => legacy.ships?.placed?.[letter]);
+  const activePlayers = getActivePlayers(normalizedPlayers, playerCount);
+
+  const rounds = {
+    current: typeof legacy.rounds?.current === "number" ? legacy.rounds.current : 1,
+    recording: typeof legacy.rounds?.recording === "number" ? legacy.rounds.recording : 1,
+    highlights: Array.isArray(legacy.rounds?.highlights) ? legacy.rounds.highlights : [],
+    playerByRound: {},
+  };
+
+  const shotsByRound =
+    legacy.shotsByRound && Object.keys(legacy.shotsByRound).length > 0
+      ? legacy.shotsByRound
+      : rebuildShotsByRoundFromCells(legacy.shotsByCell);
+  const maxRound = Math.max(
+    1,
+    rounds.current,
+    ...Object.keys(shotsByRound || {})
+      .map((k) => Number(k))
+      .filter((n) => Number.isFinite(n))
+  );
+  rounds.playerByRound = inferRoundAssignments(maxRound, activePlayers);
+
+  return {
+    ...base,
+    version: SCHEMA_VERSION,
+    mode:
+      legacy.mode === MODES.RECORD_SHOTS
+        ? MODES.RECORD_SHOTS
+        : allShipsPlaced
+          ? MODES.PLACE_SHIPS
+          : MODES.SETUP_PLAYERS,
+    setup: {
+      playerCount,
+      userPlayerId: activePlayers[0]?.id ?? null,
+    },
+    rounds,
+    shotsByCell: legacy.shotsByCell || {},
+    shotsByRound,
+    ships: {
+      placed: {
+        A: legacy.ships?.placed?.A ?? null,
+        B: legacy.ships?.placed?.B ?? null,
+        C: legacy.ships?.placed?.C ?? null,
+        D: legacy.ships?.placed?.D ?? null,
+        S: legacy.ships?.placed?.S ?? null,
+      },
+      byCell: legacy.ships?.byCell || {},
+    },
+    ui: {
+      placement: {
+        selectedShip: legacy.ui?.placement?.selectedShip || "A",
+        orientation: legacy.ui?.placement?.orientation || "H",
+      },
+    },
+    players: normalizedPlayers,
+  };
+}
+
+function normalizeState(rawState) {
+  const base = makeInitialState();
+  const requestedMode = Object.values(MODES).includes(rawState.mode) ? rawState.mode : null;
+
+  const playersSource = Array.isArray(rawState.players) ? rawState.players.slice(0, 6) : [];
+  const players = Array.from({ length: 6 }, (_, idx) => normalizePlayer(playersSource[idx], idx));
+
+  const setup = {
+    playerCount: clamp(Number(rawState.setup?.playerCount) || inferPlayerCount(players), 2, 6),
+    userPlayerId: typeof rawState.setup?.userPlayerId === "string" ? rawState.setup.userPlayerId : null,
+  };
+  const activePlayers = getActivePlayers(players, setup.playerCount);
+  const activePlayerIds = new Set(activePlayers.map((player) => player.id));
+  if (!activePlayerIds.has(setup.userPlayerId)) {
+    setup.userPlayerId = requestedMode === MODES.SETUP_PLAYERS ? null : activePlayers[0]?.id ?? null;
+  }
+
+  const shotsByRound =
+    rawState.shotsByRound && Object.keys(rawState.shotsByRound).length > 0
+      ? rawState.shotsByRound
+      : rebuildShotsByRoundFromCells(rawState.shotsByCell);
+  const shotsByCell =
+    rawState.shotsByRound && Object.keys(rawState.shotsByRound).length > 0
+      ? rebuildShotsByCellFromRounds(rawState.shotsByRound)
+      : { ...(rawState.shotsByCell || {}) };
+
+  const placed = {
+    A: rawState.ships?.placed?.A ?? null,
+    B: rawState.ships?.placed?.B ?? null,
+    C: rawState.ships?.placed?.C ?? null,
+    D: rawState.ships?.placed?.D ?? null,
+    S: rawState.ships?.placed?.S ?? null,
+  };
+
+  const rounds = {
+    current: typeof rawState.rounds?.current === "number" ? rawState.rounds.current : 1,
+    recording: typeof rawState.rounds?.recording === "number" ? rawState.rounds.recording : 1,
+    highlights: Array.isArray(rawState.rounds?.highlights) ? rawState.rounds.highlights : [],
+    playerByRound: { ...(rawState.rounds?.playerByRound || {}) },
+  };
+
+  const maxRound = Math.max(
+    1,
+    rounds.current,
+    ...Object.keys(shotsByRound)
+      .map((k) => Number(k))
+      .filter((n) => Number.isFinite(n)),
+    ...Object.keys(rounds.playerByRound)
+      .map((k) => Number(k))
+      .filter((n) => Number.isFinite(n))
+  );
+
+  rounds.current = clamp(rounds.current, 1, maxRound);
+  rounds.recording = clamp(rounds.recording, 1, maxRound);
+
+  const inferredAssignments = inferRoundAssignments(maxRound, activePlayers);
+  for (let round = 1; round <= maxRound; round += 1) {
+    const playerId = rounds.playerByRound[round];
+    rounds.playerByRound[round] = activePlayerIds.has(playerId) ? playerId : inferredAssignments[round] ?? null;
+  }
+
+  const allShipsPlaced = Object.keys(SHIPS).every((letter) => !!placed[letter]);
+  const normalizedMode = requestedMode || (allShipsPlaced ? MODES.RECORD_SHOTS : MODES.SETUP_PLAYERS);
+
+  return {
+    ...base,
+    version: SCHEMA_VERSION,
+    mode: normalizedMode,
+    setup,
+    rounds,
+    shotsByCell,
+    shotsByRound,
+    ships: {
+      placed,
+      byCell: buildShipsByCell(placed),
+    },
+    ui: {
+      placement: {
+        selectedShip: rawState.ui?.placement?.selectedShip || "A",
+        orientation: rawState.ui?.placement?.orientation || "H",
+      },
+    },
+    players,
+  };
+}
+
+function tryLoadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.version === 1) return normalizeState(migrateLegacyState(parsed));
+    if (parsed.version !== SCHEMA_VERSION) return null;
+
+    return normalizeState(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function computeMainPlayerDamage(shipsPlaced, shotsByCell) {
+  const damage = makeEmptyDamage();
 
   for (const letter of Object.keys(SHIPS)) {
     const placed = shipsPlaced[letter];
     if (!placed || !Array.isArray(placed.cells)) continue;
 
-    // Hits are shots on any cell occupied by this ship
     const hits = [];
     placed.cells.forEach((id, idx) => {
-      const r = shotsByCell[id];
-      if (r != null) hits.push({ round: Number(r), idx });
+      const round = shotsByCell[id];
+      if (round != null) hits.push({ round: Number(round), idx });
     });
 
-    // Stable order: round asc, then ship-cell order asc
     hits.sort((a, b) => (a.round - b.round) || (a.idx - b.idx));
 
-    for (let i = 0; i < Math.min(hits.length, damage[letter].length); i++) {
+    for (let i = 0; i < Math.min(hits.length, damage[letter].length); i += 1) {
       damage[letter][i] = String(hits[i].round);
     }
   }
 
   return damage;
-}
-
-function normalizeDamageTrack(track) {
-  const filled = track
-    .filter((v) => v !== "")
-    .sort((a, b) => Number(a) - Number(b));
-  return [...filled, ...Array(track.length - filled.length).fill("")];
 }
 
 function toggleDamageTrackHit(track, clickedIdx, roundNumber) {
@@ -166,102 +393,13 @@ function toggleDamageTrackHit(track, clickedIdx, roundNumber) {
 
   const actualIdx = nextTrack.length - 1 - removableIdx;
   nextTrack[actualIdx] = "";
-  return normalizeDamageTrack(nextTrack);
-}
-
-function tryLoadState() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || parsed.version !== SCHEMA_VERSION) return null;
-
-    // Normalize / repair minimal invariants
-    const s = parsed;
-
-    if (!s.rounds) s.rounds = { current: 1, recording: 1, highlights: [] };
-    if (!Array.isArray(s.rounds.highlights)) s.rounds.highlights = [];
-    if (typeof s.rounds.current !== "number") s.rounds.current = 1;
-    if (typeof s.rounds.recording !== "number") s.rounds.recording = s.rounds.current;
-
-    if (!s.shotsByCell || typeof s.shotsByCell !== "object") s.shotsByCell = {};
-    if (!s.shotsByRound || typeof s.shotsByRound !== "object") s.shotsByRound = {};
-
-    if (!s.ships) s.ships = { placed: { A: null, B: null, C: null, D: null, S: null }, byCell: {} };
-    if (!s.ships.placed) s.ships.placed = { A: null, B: null, C: null, D: null, S: null };
-    if (!s.ships.byCell || typeof s.ships.byCell !== "object") s.ships.byCell = {};
-
-    if (!s.ui) s.ui = { placement: { selectedShip: "A", orientation: "H" } };
-    if (!s.ui.placement) s.ui.placement = { selectedShip: "A", orientation: "H" };
-
-    if (!Array.isArray(s.players) || s.players.length !== 6) s.players = makeDefaultPlayers();
-    s.players = s.players.map((p) => ({
-      ...p,
-      damage: Object.fromEntries(
-        Object.keys(SHIPS).map((letter) => [
-          letter,
-          normalizeDamageTrack(Array.isArray(p.damage?.[letter]) ? p.damage[letter] : Array(SHIPS[letter].length).fill("")),
-        ])
-      ),
-    }));
-
-    // Rebuild shotsByCell from shotsByRound if needed/safer:
-    // (authoritative: shotsByRound; but if empty and shotsByCell exists, keep)
-    const hasRoundData = Object.keys(s.shotsByRound).length > 0;
-    if (hasRoundData) {
-      const rebuilt = {};
-      for (const [rk, arr] of Object.entries(s.shotsByRound)) {
-        const r = Number(rk);
-        if (!Array.isArray(arr)) continue;
-        for (const id of arr) rebuilt[id] = r;
-      }
-      s.shotsByCell = rebuilt;
-    } else {
-      // Build shotsByRound from shotsByCell
-      const rebuiltRound = {};
-      for (const [id, r] of Object.entries(s.shotsByCell)) {
-        const rr = Number(r);
-        if (!rebuiltRound[rr]) rebuiltRound[rr] = [];
-        rebuiltRound[rr].push(id);
-      }
-      s.shotsByRound = rebuiltRound;
-    }
-
-    // Rebuild ships.byCell from ships.placed if needed
-    const hasPlaced = s.ships?.placed && Object.values(s.ships.placed).some(Boolean);
-    if (hasPlaced) {
-      const byCell = {};
-      for (const [letter, info] of Object.entries(s.ships.placed)) {
-        if (!info || !Array.isArray(info.cells)) continue;
-        for (const id of info.cells) byCell[id] = letter;
-      }
-      s.ships.byCell = byCell;
-    }
-
-    // Clamp rounds
-    const maxUsedRound = Math.max(
-      1,
-      s.rounds.current,
-      ...Object.keys(s.shotsByRound).map((k) => Number(k)).filter((n) => Number.isFinite(n))
-    );
-    s.rounds.current = clamp(s.rounds.current, 1, maxUsedRound);
-    s.rounds.recording = clamp(s.rounds.recording, 1, maxUsedRound);
-
-    // Auto mode if ships all placed
-    const allShipsPlaced = Object.keys(SHIPS).every((k) => s.ships.placed[k]);
-    if (allShipsPlaced) s.mode = s.mode || "RECORD_SHOTS";
-    if (!s.mode) s.mode = "PLACE_SHIPS";
-
-    return s;
-  } catch {
-    return null;
-  }
+  return normalizeDamageTrack(nextTrack, nextTrack.length);
 }
 
 function useDebouncedEffect(effect, deps, delayMs) {
   React.useEffect(() => {
-    const t = setTimeout(() => effect(), delayMs);
-    return () => clearTimeout(t);
+    const timeoutId = setTimeout(() => effect(), delayMs);
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
@@ -270,7 +408,7 @@ function computeFootprint(anchorR, anchorC, shipLetter, orientationKey) {
   const len = SHIPS[shipLetter].length;
   const { dr, dc } = ORIENTATIONS[orientationKey];
   const cells = [];
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < len; i += 1) {
     const r = anchorR + dr * i;
     const c = anchorC + dc * i;
     cells.push({ r, c, id: cellId(r, c) });
@@ -282,11 +420,54 @@ function isInBounds(r, c) {
   return r >= 0 && r < 10 && c >= 1 && c <= 10;
 }
 
+function getRoundShots(shotsByRound, roundNumber) {
+  return Array.isArray(shotsByRound?.[roundNumber]) ? shotsByRound[roundNumber] : [];
+}
+
+function getShipDamageAtRound(playerDamage, shipLetter, completedThroughRound) {
+  return (playerDamage[shipLetter] || []).filter((value) => value !== "" && Number(value) <= completedThroughRound);
+}
+
+function isShipSunkByRound(playerDamage, shipLetter, roundNumber) {
+  return getShipDamageAtRound(playerDamage, shipLetter, roundNumber - 1).length >= SHIPS[shipLetter].length;
+}
+
+function countActiveShipsForRound(playerDamage, roundNumber) {
+  return Object.keys(SHIPS).filter((letter) => !isShipSunkByRound(playerDamage, letter, roundNumber)).length;
+}
+
+function getRoundPlayerId(roundNumber, rounds, activePlayers) {
+  if (rounds.playerByRound?.[roundNumber]) return rounds.playerByRound[roundNumber];
+  if (!activePlayers.length) return null;
+  return activePlayers[(roundNumber - 1) % activePlayers.length].id;
+}
+
+function getPlayerDisplayName(player, fallbackIdx) {
+  if (!player) return fallbackIdx >= 0 ? `Player ${fallbackIdx + 1}` : "Unknown player";
+  return player.name.trim() || `Player ${fallbackIdx + 1}`;
+}
+
+function findNextEligiblePlayerId({ roundNumber, currentPlayerId, activePlayers, damageByPlayer }) {
+  if (!activePlayers.length) return null;
+
+  const startIdx = Math.max(
+    0,
+    activePlayers.findIndex((player) => player.id === currentPlayerId)
+  );
+
+  for (let offset = 1; offset <= activePlayers.length; offset += 1) {
+    const candidate = activePlayers[(startIdx + offset) % activePlayers.length];
+    const damage = damageByPlayer[candidate.id];
+    if (damage && countActiveShipsForRound(damage, roundNumber) > 0) return candidate.id;
+  }
+
+  return null;
+}
+
 function App() {
   const [state, setState] = React.useState(() => tryLoadState() ?? makeInitialState());
-  const [hoverCell, setHoverCell] = React.useState(null); // {r,c,id} or null
+  const [hoverCell, setHoverCell] = React.useState(null);
 
-  // Persist
   useDebouncedEffect(
     () => {
       try {
@@ -299,149 +480,320 @@ function App() {
     150
   );
 
-  const allShipsPlaced = React.useMemo(() => {
-    return Object.keys(SHIPS).every((k) => !!state.ships.placed[k]);
-  }, [state.ships.placed]);
+  const activePlayers = React.useMemo(
+    () => getActivePlayers(state.players, state.setup.playerCount),
+    [state.players, state.setup.playerCount]
+  );
+
+  const activePlayerIds = React.useMemo(() => new Set(activePlayers.map((player) => player.id)), [activePlayers]);
+
+  const boardOwnerId = React.useMemo(() => {
+    if (activePlayerIds.has(state.setup.userPlayerId)) return state.setup.userPlayerId;
+    return activePlayers[0]?.id ?? null;
+  }, [activePlayerIds, activePlayers, state.setup.userPlayerId]);
+
+  const allShipsPlaced = React.useMemo(
+    () => Object.keys(SHIPS).every((letter) => !!state.ships.placed[letter]),
+    [state.ships.placed]
+  );
+
+  const mainPlayerDamage = React.useMemo(
+    () => computeMainPlayerDamage(state.ships.placed, state.shotsByCell),
+    [state.ships.placed, state.shotsByCell]
+  );
+
+  const damageByPlayer = React.useMemo(() => {
+    const map = {};
+    activePlayers.forEach((player) => {
+      map[player.id] = player.id === boardOwnerId ? mainPlayerDamage : player.damage;
+    });
+    return map;
+  }, [activePlayers, boardOwnerId, mainPlayerDamage]);
 
   const maxRoundSeen = React.useMemo(() => {
-    const keys = Object.keys(state.shotsByRound).map((k) => Number(k)).filter((n) => Number.isFinite(n));
-    return Math.max(1, state.rounds.current, ...keys);
-  }, [state.shotsByRound, state.rounds.current]);
+    const roundKeys = Object.keys(state.shotsByRound)
+      .map((k) => Number(k))
+      .filter((n) => Number.isFinite(n));
+    const ownerKeys = Object.keys(state.rounds.playerByRound || {})
+      .map((k) => Number(k))
+      .filter((n) => Number.isFinite(n));
+    return Math.max(1, state.rounds.current, ...roundKeys, ...ownerKeys);
+  }, [state.shotsByRound, state.rounds.current, state.rounds.playerByRound]);
 
   const highlightsSet = React.useMemo(() => new Set(state.rounds.highlights), [state.rounds.highlights]);
 
   const placementPreview = React.useMemo(() => {
-    if (!hoverCell) return { cells: [], valid: true };
-    if (state.mode !== "PLACE_SHIPS") return { cells: [], valid: true };
+    if (!hoverCell || state.mode !== MODES.PLACE_SHIPS) return { cells: [], valid: true };
 
     const ship = state.ui.placement.selectedShip;
-    const ori = state.ui.placement.orientation;
+    const orientation = state.ui.placement.orientation;
     if (!ship || !SHIPS[ship]) return { cells: [], valid: true };
 
-    const candidate = computeFootprint(hoverCell.r, hoverCell.c, ship, ori);
+    const candidate = computeFootprint(hoverCell.r, hoverCell.c, ship, orientation);
 
-    // bounds
-    for (const c of candidate) {
-      if (!isInBounds(c.r, c.c)) return { cells: candidate, valid: false };
+    for (const cell of candidate) {
+      if (!isInBounds(cell.r, cell.c)) return { cells: candidate, valid: false };
     }
 
-    // overlap check: allow overlap with the same ship's current cells (since we "move" it)
-    const existing = state.ships.placed[ship]?.cells ? new Set(state.ships.placed[ship].cells) : new Set();
-    for (const c of candidate) {
-      const occ = state.ships.byCell[c.id];
-      if (occ && occ !== ship) return { cells: candidate, valid: false };
-      if (occ === ship && !existing.has(c.id)) {
-        // This is still OK; same ship can overlap itself only if it was there before; but byCell for ship matches existing anyway.
-      }
+    for (const cell of candidate) {
+      const occupiedBy = state.ships.byCell[cell.id];
+      if (occupiedBy && occupiedBy !== ship) return { cells: candidate, valid: false };
     }
 
     return { cells: candidate, valid: true };
-  }, [hoverCell, state.mode, state.ui.placement, state.ships.byCell, state.ships.placed]);
+  }, [hoverCell, state.mode, state.ui.placement, state.ships.byCell]);
 
-  const mainPlayerDamage = React.useMemo(() => {
-    return computeMainPlayerDamage(state.ships.placed, state.shotsByCell);
-  }, [state.ships.placed, state.shotsByCell]);
+  const setupComplete = React.useMemo(() => {
+    if (!activePlayerIds.has(state.setup.userPlayerId)) return false;
+    return activePlayers.every((player) => player.name.trim() !== "");
+  }, [activePlayerIds, activePlayers, state.setup.userPlayerId]);
 
-  function toggleHighlightRound(r) {
+  const recordingRound = state.rounds.recording;
+  const currentRound = state.rounds.current;
+  const recordingPlayerId = React.useMemo(
+    () => getRoundPlayerId(recordingRound, state.rounds, activePlayers),
+    [recordingRound, state.rounds, activePlayers]
+  );
+  const currentPlayerId = React.useMemo(
+    () => getRoundPlayerId(currentRound, state.rounds, activePlayers),
+    [currentRound, state.rounds, activePlayers]
+  );
+
+  const recordingRoundShots = getRoundShots(state.shotsByRound, recordingRound).length;
+  const currentRoundShots = getRoundShots(state.shotsByRound, currentRound).length;
+  const recordingShotLimit = recordingPlayerId ? countActiveShipsForRound(damageByPlayer[recordingPlayerId], recordingRound) : 0;
+  const currentShotLimit = currentPlayerId ? countActiveShipsForRound(damageByPlayer[currentPlayerId], currentRound) : 0;
+  const nextRoundNumber = currentRound + 1;
+  const nextRoundPlayerId = React.useMemo(
+    () =>
+      currentPlayerId
+        ? findNextEligiblePlayerId({
+            roundNumber: nextRoundNumber,
+            currentPlayerId,
+            activePlayers,
+            damageByPlayer,
+          })
+        : null,
+    [activePlayers, currentPlayerId, damageByPlayer, nextRoundNumber]
+  );
+
+  const currentRoundComplete =
+    currentShotLimit === 0 ? true : currentRoundShots === currentShotLimit;
+  const canAdvanceRound =
+    state.mode === MODES.RECORD_SHOTS && currentRoundComplete && !!nextRoundPlayerId;
+
+  const modeTag =
+    state.mode === MODES.SETUP_PLAYERS
+      ? { text: "PLAYER SETUP", cls: "warn" }
+      : state.mode === MODES.PLACE_SHIPS
+        ? { text: "SHIP PLACEMENT", cls: "warn" }
+        : { text: "RECORDING SHOTS", cls: "ok" };
+
+  function toggleHighlightRound(round) {
     setState((prev) => {
-      const set = new Set(prev.rounds.highlights);
-      if (set.has(r)) set.delete(r);
-      else set.add(r);
-      return { ...prev, rounds: { ...prev.rounds, highlights: Array.from(set).sort((a, b) => a - b) } };
-    });
-  }
-
-  function nextRound() {
-    setState((prev) => {
-      const next = prev.rounds.current + 1;
+      const nextHighlights = new Set(prev.rounds.highlights);
+      if (nextHighlights.has(round)) nextHighlights.delete(round);
+      else nextHighlights.add(round);
       return {
         ...prev,
-        rounds: { ...prev.rounds, current: next, recording: next },
+        rounds: {
+          ...prev.rounds,
+          highlights: Array.from(nextHighlights).sort((a, b) => a - b),
+        },
       };
     });
-  }
-
-  function setRecordingRound(r) {
-    setState((prev) => ({ ...prev, rounds: { ...prev.rounds, recording: r } }));
-  }
-
-  function setMode(mode) {
-    setState((prev) => ({ ...prev, mode }));
   }
 
   function clearAll() {
     const ok = window.confirm("Clear all game data and start a new game? This cannot be undone.");
     if (!ok) return;
+
     try {
       localStorage.removeItem(LS_KEY);
     } catch {
       // ignore
     }
+
     setState(makeInitialState());
     setHoverCell(null);
   }
 
   function setPlacementSelectedShip(letter) {
-    setState((prev) => ({ ...prev, ui: { ...prev.ui, placement: { ...prev.ui.placement, selectedShip: letter } } }));
+    setState((prev) => ({
+      ...prev,
+      ui: { ...prev.ui, placement: { ...prev.ui.placement, selectedShip: letter } },
+    }));
   }
 
-  function setPlacementOrientation(ori) {
-    setState((prev) => ({ ...prev, ui: { ...prev.ui, placement: { ...prev.ui.placement, orientation: ori } } }));
+  function setPlacementOrientation(orientation) {
+    setState((prev) => ({
+      ...prev,
+      ui: { ...prev.ui, placement: { ...prev.ui.placement, orientation } },
+    }));
+  }
+
+  function setPlayerCount(value) {
+    setState((prev) => {
+      if (prev.mode !== MODES.SETUP_PLAYERS) return prev;
+      const playerCount = clamp(value, 2, 6);
+      const active = getActivePlayers(prev.players, playerCount);
+      const activeIds = new Set(active.map((player) => player.id));
+      const userPlayerId = activeIds.has(prev.setup.userPlayerId) ? prev.setup.userPlayerId : null;
+
+      return {
+        ...prev,
+        setup: {
+          ...prev.setup,
+          playerCount,
+          userPlayerId,
+        },
+      };
+    });
+  }
+
+  function setUserPlayerId(playerId) {
+    setState((prev) => {
+      if (prev.mode !== MODES.SETUP_PLAYERS) return prev;
+      const activeIds = new Set(getActivePlayers(prev.players, prev.setup.playerCount).map((player) => player.id));
+      if (!activeIds.has(playerId)) return prev;
+      return {
+        ...prev,
+        setup: {
+          ...prev.setup,
+          userPlayerId: playerId,
+        },
+      };
+    });
+  }
+
+  function updatePlayerName(idx, value) {
+    setState((prev) => {
+      if (prev.mode !== MODES.SETUP_PLAYERS) return prev;
+      const players = prev.players.map((player, playerIdx) => (
+        playerIdx === idx ? { ...player, name: value } : player
+      ));
+      return { ...prev, players };
+    });
+  }
+
+  function enterPlacement() {
+    setState((prev) => {
+      const active = getActivePlayers(prev.players, prev.setup.playerCount);
+      const namesReady = active.every((player) => player.name.trim() !== "");
+      const activeIds = new Set(active.map((player) => player.id));
+      if (!namesReady || !activeIds.has(prev.setup.userPlayerId)) return prev;
+      return { ...prev, mode: MODES.PLACE_SHIPS };
+    });
+  }
+
+  function backToSetup() {
+    setState((prev) => ({ ...prev, mode: MODES.SETUP_PLAYERS }));
+  }
+
+  function startGame() {
+    setState((prev) => {
+      const active = getActivePlayers(prev.players, prev.setup.playerCount);
+      if (!active.length) return prev;
+      const namesReady = active.every((player) => player.name.trim() !== "");
+      const activeIds = new Set(active.map((player) => player.id));
+      if (!namesReady || !activeIds.has(prev.setup.userPlayerId)) return prev;
+
+      const shipsPlaced = Object.keys(SHIPS).every((letter) => !!prev.ships.placed[letter]);
+      if (!shipsPlaced) return prev;
+
+      return {
+        ...prev,
+        mode: MODES.RECORD_SHOTS,
+        rounds: {
+          current: 1,
+          recording: 1,
+          highlights: [],
+          playerByRound: { 1: active[0].id },
+        },
+      };
+    });
+  }
+
+  function setRecordingRound(round) {
+    setState((prev) => ({
+      ...prev,
+      rounds: {
+        ...prev.rounds,
+        recording: clamp(round, 1, maxRoundSeen),
+      },
+    }));
+  }
+
+  function nextRound() {
+    if (!canAdvanceRound || !nextRoundPlayerId) return;
+
+    setState((prev) => ({
+      ...prev,
+      rounds: {
+        ...prev.rounds,
+        current: nextRoundNumber,
+        recording: nextRoundNumber,
+        playerByRound: {
+          ...prev.rounds.playerByRound,
+          [nextRoundNumber]: nextRoundPlayerId,
+        },
+      },
+    }));
   }
 
   function commitShipPlacement(anchorR, anchorC) {
     const ship = state.ui.placement.selectedShip;
-    const ori = state.ui.placement.orientation;
+    const orientation = state.ui.placement.orientation;
     if (!ship) return;
 
-    const candidate = computeFootprint(anchorR, anchorC, ship, ori);
-
-    // validate bounds first
-    for (const c of candidate) {
-      if (!isInBounds(c.r, c.c)) return;
+    const candidate = computeFootprint(anchorR, anchorC, ship, orientation);
+    for (const cell of candidate) {
+      if (!isInBounds(cell.r, cell.c)) return;
     }
 
     setState((prev) => {
-      const prevPlaced = prev.ships.placed[ship]; // maybe null
-      const prevCells = prevPlaced?.cells ? [...prevPlaced.cells] : [];
-      const prevCellsSet = new Set(prevCells);
-
-      // Remove previous placement for this ship from byCell
+      const previousPlacement = prev.ships.placed[ship];
+      const previousCells = previousPlacement?.cells ? [...previousPlacement.cells] : [];
       const byCell = { ...prev.ships.byCell };
-      for (const id of prevCells) {
+
+      for (const id of previousCells) {
         if (byCell[id] === ship) delete byCell[id];
       }
 
-      // Check overlap against other ships (using byCell after removing this ship)
-      for (const c of candidate) {
-        const occ = byCell[c.id];
-        if (occ && occ !== ship) {
-          // restore old byCell and abort (no change)
-          for (const id of prevCells) byCell[id] = ship;
+      for (const cell of candidate) {
+        const occupiedBy = byCell[cell.id];
+        if (occupiedBy && occupiedBy !== ship) {
           return prev;
         }
       }
 
-      // Commit new placement
-      for (const c of candidate) byCell[c.id] = ship;
+      for (const cell of candidate) byCell[cell.id] = ship;
 
-      const placedInfo = {
-        anchor: cellId(anchorR, anchorC),
-        orientation: ori,
-        cells: candidate.map((x) => x.id),
+      const placed = {
+        ...prev.ships.placed,
+        [ship]: {
+          anchor: cellId(anchorR, anchorC),
+          orientation,
+          cells: candidate.map((cell) => cell.id),
+        },
       };
 
-      const placed = { ...prev.ships.placed, [ship]: placedInfo };
-      const ships = { ...prev.ships, placed, byCell };
-
-      // Auto-advance selected ship to next unplaced (nice)
-      const nextShip = Object.keys(SHIPS).find((k) => !placed[k]) ?? ship;
+      const nextShip = Object.keys(SHIPS).find((letter) => !placed[letter]) ?? ship;
 
       return {
         ...prev,
-        ships,
-        // Stay in PLACE_SHIPS until user explicitly clicks Start Game
-        ui: { ...prev.ui, placement: { ...prev.ui.placement, selectedShip: nextShip } },
+        ships: {
+          ...prev.ships,
+          placed,
+          byCell,
+        },
+        ui: {
+          ...prev.ui,
+          placement: {
+            ...prev.ui.placement,
+            selectedShip: nextShip,
+          },
+        },
       };
     });
   }
@@ -449,55 +801,37 @@ function App() {
   function handleCellClick(r, c) {
     const id = cellId(r, c);
 
-    if (state.mode === "PLACE_SHIPS") {
-      // Place/move selected ship
-      // Only commit if preview is valid and anchor matches clicked cell
-      const ship = state.ui.placement.selectedShip;
-      if (!ship) return;
-      // Validate using current preview logic (recompute quickly)
-      const candidate = computeFootprint(r, c, ship, state.ui.placement.orientation);
-      // bounds
-      for (const cc of candidate) {
-        if (!isInBounds(cc.r, cc.c)) return;
-      }
-      // overlap check is done in commit (with restore)
+    if (state.mode === MODES.PLACE_SHIPS) {
       commitShipPlacement(r, c);
       return;
     }
 
-    // RECORD_SHOTS
-    const recording = state.rounds.recording;
+    if (state.mode !== MODES.RECORD_SHOTS) return;
+
     const existingRound = state.shotsByCell[id];
 
-    // If occupied by some round:
     if (existingRound != null) {
-      // remove only if it's the recording round
-      if (Number(existingRound) !== Number(recording)) return;
+      if (Number(existingRound) !== Number(recordingRound)) return;
 
       setState((prev) => {
         const shotsByCell = { ...prev.shotsByCell };
         delete shotsByCell[id];
 
         const shotsByRound = { ...prev.shotsByRound };
-        const arr = Array.isArray(shotsByRound[recording]) ? [...shotsByRound[recording]] : [];
-        const idx = arr.indexOf(id);
-        if (idx >= 0) arr.splice(idx, 1);
-        shotsByRound[recording] = arr;
+        const roundShots = getRoundShots(shotsByRound, recordingRound).filter((shotId) => shotId !== id);
+        shotsByRound[recordingRound] = roundShots;
 
         return { ...prev, shotsByCell, shotsByRound };
       });
       return;
     }
 
-    // If empty: add shot for recording round
+    if (!recordingPlayerId || recordingRoundShots >= recordingShotLimit) return;
+
     setState((prev) => {
-      const shotsByCell = { ...prev.shotsByCell, [id]: recording };
-
+      const shotsByCell = { ...prev.shotsByCell, [id]: recordingRound };
       const shotsByRound = { ...prev.shotsByRound };
-      const arr = Array.isArray(shotsByRound[recording]) ? [...shotsByRound[recording]] : [];
-      arr.push(id);
-      shotsByRound[recording] = arr;
-
+      shotsByRound[recordingRound] = [...getRoundShots(shotsByRound, recordingRound), id];
       return { ...prev, shotsByCell, shotsByRound };
     });
   }
@@ -510,79 +844,82 @@ function App() {
     setHoverCell(null);
   }
 
-  function updatePlayerName(idx, value) {
-    setState((prev) => {
-      const players = prev.players.map((p, i) => (i === idx ? { ...p, name: value } : p));
-      return { ...prev, players };
-    });
-  }
-
   function togglePlayerDamage(idx, shipLetter, hitIdx) {
     setState((prev) => {
-      const players = prev.players.map((p, i) => {
-        if (i !== idx) return p;
-        const damageShip = toggleDamageTrackHit(p.damage[shipLetter], hitIdx, prev.rounds.recording);
-        return { ...p, damage: { ...p.damage, [shipLetter]: damageShip } };
-      });
+      if (prev.mode !== MODES.RECORD_SHOTS) return prev;
+      const player = prev.players[idx];
+      if (!player || player.id === boardOwnerId) return prev;
+
+      const playerDamage = player.damage[shipLetter];
+      const nextTrack = toggleDamageTrackHit(playerDamage, hitIdx, prev.rounds.recording);
+      const players = prev.players.map((candidate, candidateIdx) => (
+        candidateIdx === idx
+          ? { ...candidate, damage: { ...candidate.damage, [shipLetter]: nextTrack } }
+          : candidate
+      ));
+
       return { ...prev, players };
     });
   }
 
-  const modeTag = state.mode === "PLACE_SHIPS"
-    ? { text: "SHIP PLACEMENT", cls: "warn" }
-    : { text: "RECORDING SHOTS", cls: "warn" };
+  const recordingPlayer = activePlayers.find((player) => player.id === recordingPlayerId) || null;
+  const boardOwnerPlayer = activePlayers.find((player) => player.id === boardOwnerId) || null;
+  const nextRoundPlayer = activePlayers.find((player) => player.id === nextRoundPlayerId) || null;
 
   return (
     <div className="app">
       <div className="topbar">
-
-        {state.mode === "PLACE_SHIPS" ? (
+        {state.mode === MODES.SETUP_PLAYERS ? (
           <div className="controls">
-              <>
-                <div className="badge">
-                  <div className="label">Ship</div>
-                  <select
-                    className="select"
-                    value={state.ui.placement.selectedShip}
-                    onChange={(e) => setPlacementSelectedShip(e.target.value)}
-                  >
-                    {Object.keys(SHIPS).map((k) => (
-                      <option key={k} value={k}>
-                        {k} ({SHIPS[k].length})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="badge">
-                  <div className="label">Orientation</div>
-                  <select
-                    className="select"
-                    value={state.ui.placement.orientation}
-                    onChange={(e) => setPlacementOrientation(e.target.value)}
-                  >
-                    {Object.entries(ORIENTATIONS).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-
-              </>
-          </div>
-          ) : (
-          <>
             <div className="badge">
-              <div className="label">Round</div>
-              <div className="value">{state.rounds.current}</div>
+              <div className="label">Players</div>
+              <select
+                className="select"
+                value={state.setup.playerCount}
+                onChange={(e) => setPlayerCount(Number(e.target.value))}
+              >
+                {Array.from({ length: 5 }, (_, idx) => idx + 2).map((count) => (
+                  <option key={count} value={count}>
+                    {count}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : state.mode === MODES.PLACE_SHIPS ? (
+          <div className="controls">
+            <div className="badge">
+              <div className="label">Ship</div>
+              <select
+                className="select"
+                value={state.ui.placement.selectedShip}
+                onChange={(e) => setPlacementSelectedShip(e.target.value)}
+              >
+                {Object.keys(SHIPS).map((letter) => (
+                  <option key={letter} value={letter}>
+                    {letter} ({SHIPS[letter].length})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <button className="btn primary" onClick={nextRound} title="Increment the current round">
-              Next Round
-            </button>
-
+            <div className="badge">
+              <div className="label">Orientation</div>
+              <select
+                className="select"
+                value={state.ui.placement.orientation}
+                onChange={(e) => setPlacementOrientation(e.target.value)}
+              >
+                {Object.entries(ORIENTATIONS).map(([key, orientation]) => (
+                  <option key={key} value={key}>
+                    {orientation.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
+          <>
             <div className="badge" title="New shots will be recorded to this round">
               <div className="label">Recording</div>
               <select
@@ -590,111 +927,202 @@ function App() {
                 value={state.rounds.recording}
                 onChange={(e) => setRecordingRound(Number(e.target.value))}
               >
-                {Array.from({ length: maxRoundSeen }, (_, i) => i + 1).map((r) => (
-                  <option key={r} value={r}>
-                    {r}
+                {Array.from({ length: maxRoundSeen }, (_, idx) => idx + 1).map((round) => (
+                  <option key={round} value={round}>
+                    {round}
                   </option>
                 ))}
               </select>
             </div>
+
+            <div className="badge">
+              <div className="label">Round</div>
+              <div className="value">{state.rounds.current}</div>
+            </div>
+
+            <div className="badge">
+              <div className="label">Turn</div>
+              <div className="value playerValue">
+                {recordingPlayer ? getPlayerDisplayName(recordingPlayer, activePlayers.indexOf(recordingPlayer)) : "-"}
+              </div>
+            </div>
+
+            <div className="badge">
+              <div className="label">Shots</div>
+              <div className="value">
+                {recordingRoundShots}/{recordingShotLimit}
+              </div>
+            </div>
+
+            <button
+              className="btn primary"
+              onClick={nextRound}
+              disabled={!canAdvanceRound}
+              title={
+                !nextRoundPlayer
+                  ? "No remaining players have active ships."
+                  : currentRoundComplete
+                    ? `Advance to ${getPlayerDisplayName(nextRoundPlayer, activePlayers.indexOf(nextRoundPlayer))}`
+                    : `Take ${currentShotLimit} shots before advancing.`
+              }
+            >
+              Next Round
+            </button>
           </>
-          )
-        }
+        )}
 
-
-
-
-        <span className={`modeTag ${modeTag.cls}`}>{modeTag.text}</span>
+        {state.mode !== MODES.RECORD_SHOTS ? (
+          <span className={`modeTag ${modeTag.cls}`}>{modeTag.text}</span>
+        ) : null}
 
         <div className="spacer" />
 
-        {state.mode === "PLACE_SHIPS" &&
+        {state.mode === MODES.SETUP_PLAYERS ? (
           <button
-            className={allShipsPlaced ? "btn primary" : "btn"}
-            style={{ fontSize: 18 }}
-            onClick={() => setMode("RECORD_SHOTS")}
-            disabled={!allShipsPlaced}
-            title={allShipsPlaced ? "Start recording shots" : "Place all ships first"}
+            className={setupComplete ? "btn primary" : "btn"}
+            onClick={enterPlacement}
+            disabled={!setupComplete}
+            title={setupComplete ? "Continue to ship placement" : "Add names for all active players and choose yourself."}
           >
-            Start Game
+            Next
           </button>
-        }
+        ) : null}
+
+        {state.mode === MODES.PLACE_SHIPS ? (
+          <>
+            <button className="btn" onClick={backToSetup}>
+              Back
+            </button>
+            <button
+              className={allShipsPlaced ? "btn primary" : "btn"}
+              onClick={startGame}
+              disabled={!allShipsPlaced}
+              title={allShipsPlaced ? "Start recording shots" : "Place all ships first"}
+            >
+              Start Game
+            </button>
+          </>
+        ) : null}
 
         <button className="btn danger" onClick={clearAll}>
           Clear All Data
         </button>
       </div>
 
-      <div className="main">
-        <div className="card">
-          <div className="gridWrap">
-            <div>
-              {state.mode === "RECORD_SHOTS" &&
-              <>
-                <div className="pills">
-                  <div className="helperText">Round: </div>
-                  {Array.from({ length: maxRoundSeen }, (_, i) => i + 1).map((r) => {
-                    const on = highlightsSet.has(r);
-                    const style = on
-                      ? { background: colorForRound(r), borderColor: "rgba(255,255,255,0.35)" }
-                      : undefined;
-                    return (
-                      <div
-                        key={r}
-                        className={`pill ${on ? "on" : ""} ${r === state.rounds.current ? "current" : ""}`}
-                        style={style}
-                        onClick={() => toggleHighlightRound(r)}
-                        title="Toggle highlight"
-                      >
-                        {r}
-                      </div>
-                    );
-                  })}
+      {state.mode === MODES.SETUP_PLAYERS ? (
+        <div className="main singleColumn">
+          <div className="card setupCard">
+            <h2>Game Setup</h2>
+            <p className="setupIntro">
+              Enter the players in turn order, then mark which one is you. Only the first {state.setup.playerCount} player
+              slots are active for this game, and player names are locked once you continue.
+            </p>
+
+            <div className="setupPlayers">
+              {activePlayers.map((player, idx) => (
+                <div key={player.id} className="setupPlayerRow">
+                  <div className="setupIndex">{idx + 1}</div>
+                  <input
+                    className="textInput"
+                    value={player.name}
+                    onChange={(e) => updatePlayerName(idx, e.target.value)}
+                    placeholder={`Player ${idx + 1} name`}
+                  />
+                  <label className="meToggle">
+                    <input
+                      type="radio"
+                      name="userPlayer"
+                      checked={state.setup.userPlayerId === player.id}
+                      onChange={() => setUserPlayerId(player.id)}
+                    />
+                    <span>This is me</span>
+                  </label>
                 </div>
-              </>}
+              ))}
             </div>
 
-            <BoardGrid
-              mode={state.mode}
-              shotsByCell={state.shotsByCell}
-              shipsByCell={state.ships.byCell}
-              highlights={highlightsSet}
-              placementPreview={placementPreview}
-              recordingRound={state.rounds.recording}
-              onCellClick={handleCellClick}
-              onCellHover={handleCellHover}
-              onCellLeave={clearHover}
-            />
-
+            <div className="footerNote">
+              The selected player becomes the board owner for ship placement and automatic damage tracking.
+            </div>
           </div>
         </div>
+      ) : (
+        <div className="main">
+          <div className="card">
+            <div className="gridWrap">
+              {state.mode === MODES.RECORD_SHOTS ? (
+                <div className="recordingSummary">
+                  <div className="pills">
+                    <div className="helperText">Round highlights:</div>
+                    {Array.from({ length: maxRoundSeen }, (_, idx) => idx + 1).map((round) => {
+                      const on = highlightsSet.has(round);
+                      const style = on
+                        ? { background: colorForRound(round), borderColor: "rgba(255,255,255,0.35)" }
+                        : undefined;
+                      return (
+                        <div
+                          key={round}
+                          className={`pill ${on ? "on" : ""} ${round === state.rounds.current ? "current" : ""}`}
+                          style={style}
+                          onClick={() => toggleHighlightRound(round)}
+                          title="Toggle highlight"
+                        >
+                          {round}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="helperText">
+                  Place the ships for {getPlayerDisplayName(boardOwnerPlayer, activePlayers.indexOf(boardOwnerPlayer))} before starting the game.
+                </div>
+              )}
 
-        <div className="card">
-          <h2>Players</h2>
-          <div className="players">
-            {state.players.map((p, idx) => {
-              const isMain = idx === 0;
+              <BoardGrid
+                mode={state.mode}
+                shotsByCell={state.shotsByCell}
+                shipsByCell={state.ships.byCell}
+                highlights={highlightsSet}
+                placementPreview={placementPreview}
+                recordingRound={recordingRound}
+                recordingShotLimit={recordingShotLimit}
+                recordingRoundShots={recordingRoundShots}
+                onCellClick={handleCellClick}
+                onCellHover={handleCellHover}
+                onCellLeave={clearHover}
+              />
+            </div>
+          </div>
 
-              const playerForRender = isMain
-                ? { ...p, damage: mainPlayerDamage }
-                : p;
-
-              return (
+          <div className="card">
+            <h2>Players</h2>
+            <div className="players">
+              {activePlayers.map((player, idx) => (
                 <PlayerCard
-                  key={p.id}
+                  key={player.id}
                   idx={idx}
-                  player={playerForRender}
-                  isMainPlayer={isMain}
-                  readOnlyDamage={isMain}
-                  recordingRound={state.rounds.recording}
-                  onNameChange={(v) => updatePlayerName(idx, v)}
+                  player={{
+                    ...player,
+                    damage: player.id === boardOwnerId ? mainPlayerDamage : player.damage,
+                  }}
+                  isUserPlayer={player.id === boardOwnerId}
+                  isActivePlayer={player.id === recordingPlayerId}
+                  damageEditable={state.mode === MODES.RECORD_SHOTS && player.id !== boardOwnerId}
+                  recordingRound={recordingRound}
                   onDamageToggle={(ship, hitIdx) => togglePlayerDamage(idx, ship, hitIdx)}
                 />
-              );
-            })}
+              ))}
+            </div>
+
+            {state.mode === MODES.RECORD_SHOTS ? (
+              <div className="footerNote">
+                Purple marks you. Yellow marks the player whose turn owns the currently selected recording round.
+              </div>
+            ) : null}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -706,110 +1134,108 @@ function BoardGrid({
   highlights,
   placementPreview,
   recordingRound,
+  recordingShotLimit,
+  recordingRoundShots,
   onCellClick,
   onCellHover,
   onCellLeave,
 }) {
-  // Quick lookup for preview
   const previewSet = React.useMemo(() => {
-    const s = new Set();
-    for (const c of placementPreview.cells) s.add(c.id);
-    return s;
+    const set = new Set();
+    for (const cell of placementPreview.cells) set.add(cell.id);
+    return set;
   }, [placementPreview.cells]);
 
   const previewValid = placementPreview.valid;
 
   return (
-    <div className="grid" onMouseLeave={onCellLeave}>
-      {/* Top-left corner blank */}
-      <div />
+    <div className="boardScroller">
+      <div className="grid" onMouseLeave={onCellLeave}>
+        <div />
 
-      {/* Column headers 1..10 */}
-      {Array.from({ length: 10 }, (_, i) => i + 1).map((col) => (
-        <div key={`ch-${col}`} className="colHeader">
-          {col}
-        </div>
-      ))}
+        {Array.from({ length: 10 }, (_, idx) => idx + 1).map((col) => (
+          <div key={`ch-${col}`} className="colHeader">
+            {col}
+          </div>
+        ))}
 
-      {/* Rows */}
-      {ROW_WORDS.map((rowLabel, r) => (
-        <React.Fragment key={`row-${r}`}>
-          <div className="rowHeader">{rowLabel}</div>
-          {Array.from({ length: 10 }, (_, i) => i + 1).map((c) => {
-            const id = cellId(r, c);
-            const shotRound = shotsByCell[id];
-            const ship = shipsByCell[id];
+        {ROW_WORDS.map((rowLabel, r) => (
+          <React.Fragment key={`row-${r}`}>
+            <div className="rowHeader">{rowLabel}</div>
+            {Array.from({ length: 10 }, (_, idx) => idx + 1).map((c) => {
+              const id = cellId(r, c);
+              const shotRound = shotsByCell[id];
+              const ship = shipsByCell[id];
+              const isPreview = mode === MODES.PLACE_SHIPS && previewSet.has(id);
+              const isHighlighted = shotRound != null && highlights.has(Number(shotRound));
+              const highlightColor = isHighlighted ? colorForRound(Number(shotRound)) : null;
+              const canRemove =
+                mode === MODES.RECORD_SHOTS && shotRound != null && Number(shotRound) === Number(recordingRound);
+              const shotQuotaReached = mode === MODES.RECORD_SHOTS && shotRound == null && recordingRoundShots >= recordingShotLimit;
 
-            const isPreview = mode === "PLACE_SHIPS" && previewSet.has(id);
-            const disabled = false; // we still allow click; logic decides validity
+              const titleParts = [`${ROW_WORDS[r]}-${c}`];
+              if (ship) titleParts.push(`Ship: ${ship}`);
+              if (shotRound != null) titleParts.push(`Shot: round ${shotRound}`);
+              if (mode === MODES.RECORD_SHOTS && shotRound != null) {
+                titleParts.push(canRemove ? "Click to remove (recording round)" : "Locked (different round)");
+              }
+              if (mode === MODES.RECORD_SHOTS && shotRound == null && shotQuotaReached) {
+                titleParts.push("This round already has the maximum number of shots.");
+              }
+              if (mode === MODES.PLACE_SHIPS && isPreview) {
+                titleParts.push(previewValid ? "Click to place ship" : "Invalid placement");
+              }
 
-            const isHighlighted = shotRound != null && highlights.has(Number(shotRound));
-            const highlightColor = isHighlighted ? colorForRound(Number(shotRound)) : null;
+              return (
+                <div
+                  key={id}
+                  className={`cell ${shotQuotaReached ? "disabled" : ""}`}
+                  title={titleParts.join(" • ")}
+                  onClick={() => onCellClick(r, c)}
+                  onMouseEnter={() => onCellHover(r, c)}
+                >
+                  {ship ? <div className={`shipMark ${shotRound != null ? "hit" : ""}`}>{ship}</div> : null}
+                  {shotRound != null ? <div className="shotNumber">{shotRound}</div> : null}
 
-            const canRemove =
-              mode === "RECORD_SHOTS" && shotRound != null && Number(shotRound) === Number(recordingRound);
+                  {isHighlighted ? (
+                    <div
+                      className="highlightOverlay"
+                      style={{
+                        background: highlightColor,
+                      }}
+                    />
+                  ) : null}
 
-            const titleParts = [];
-            titleParts.push(`${ROW_WORDS[r]}-${c}`);
-            if (ship) titleParts.push(`Ship: ${ship}`);
-            if (shotRound != null) titleParts.push(`Shot: round ${shotRound}`);
-            if (mode === "RECORD_SHOTS" && shotRound != null) {
-              titleParts.push(canRemove ? "Click to remove (recording round)" : "Locked (different round)");
-            }
-            if (mode === "PLACE_SHIPS" && isPreview) {
-              titleParts.push(previewValid ? "Click to place ship" : "Invalid placement");
-            }
+                  {isPreview ? (
+                    previewValid ? <div className="previewOverlay" /> : <div className="invalidPreviewOverlay" />
+                  ) : null}
+                </div>
+              );
+            })}
+          </React.Fragment>
+        ))}
 
-            return (
-              <div
-                key={id}
-                className={`cell ${disabled ? "disabled" : ""}`}
-                title={titleParts.join(" • ")}
-                onClick={() => onCellClick(r, c)}
-                onMouseEnter={() => onCellHover(r, c)}
-              >
-                {ship ? (
-                  <div className={`shipMark ${shotRound != null ? "hit" : ""}`}>{ship}</div>
-                ) : null}
-                {shotRound != null ? <div className="shotNumber">{shotRound}</div> : null}
-
-                {isHighlighted ? (
-                  <div
-                    className="highlightOverlay"
-                    style={{
-                      background: highlightColor,
-                    }}
-                  />
-                ) : null}
-
-                {isPreview ? (
-                  previewValid ? <div className="previewOverlay" /> : <div className="invalidPreviewOverlay" />
-                ) : null}
-              </div>
-            );
-          })}
-        </React.Fragment>
-      ))}
+        <div />
+        {Array.from({ length: 10 }, (_, idx) => idx + 1).map((col) => (
+          <div key={`cb-${col}`} className="colHeader">
+            {col}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function PlayerCard({ idx, player, isMainPlayer, readOnlyDamage, recordingRound, onNameChange, onDamageToggle }) {
+function PlayerCard({ idx, player, isUserPlayer, isActivePlayer, damageEditable, recordingRound, onDamageToggle }) {
   const sunk = (shipLetter) => {
     const arr = player.damage[shipLetter] || [];
-    return arr.length > 0 && arr.every((v) => v !== "");
+    return arr.length > 0 && arr.every((value) => value !== "");
   };
 
   return (
-    <div className={`playerCard ${isMainPlayer ? "mainPlayer" : ""}`}>
+    <div className={`playerCard ${isUserPlayer ? "userPlayer" : ""} ${isActivePlayer ? "activePlayer" : ""}`}>
       <div className="playerHeader">
-        <div className="idx">{idx + 1}</div>
-        <input
-          className="textInput"
-          value={player.name}
-          onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Player name"
-        />
+        <div className="playerName">{getPlayerDisplayName(player, idx)}</div>
       </div>
 
       {Object.keys(SHIPS).map((letter) => (
@@ -818,23 +1244,25 @@ function PlayerCard({ idx, player, isMainPlayer, readOnlyDamage, recordingRound,
             {letter}
           </div>
           <div className="hitBoxes">
-            {player.damage[letter].map((val, i) => (
+            {player.damage[letter].map((value, hitIdx) => (
               <button
-                key={`${letter}-${i}`}
+                key={`${letter}-${hitIdx}`}
                 type="button"
-                className={`hitInput ${val !== "" ? "filled" : ""}`}
-                disabled={!!readOnlyDamage}
+                className={`hitInput ${value !== "" ? "filled" : ""}`}
+                disabled={!damageEditable}
                 onClick={() => {
-                  if (readOnlyDamage) return;
-                  onDamageToggle(letter, i);
+                  if (!damageEditable) return;
+                  onDamageToggle(letter, hitIdx);
                 }}
                 title={
-                  readOnlyDamage
-                    ? `${letter} hits (auto-calculated)`
-                    : `${letter} hit ${i + 1} • click to mark/unmark round ${recordingRound}`
+                  damageEditable
+                    ? `${letter} hit ${hitIdx + 1} • click to mark/unmark round ${recordingRound}`
+                    : isUserPlayer
+                      ? `${letter} hits are auto-calculated from board shots`
+                      : `${letter} hits are locked until shot recording begins`
                 }
               >
-                {val || ""}
+                {value || ""}
               </button>
             ))}
           </div>

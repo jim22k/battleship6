@@ -1,106 +1,82 @@
 # Multiplayer Battleship Game Recorder
 
-A static web application for recording and visualizing the progress of a multiplayer Battleship game.
+A static web app for tracking a multiplayer Battleship game entirely in the browser.
 
-This tool is designed to track rounds, shots fired, ship placement, and player ship damage — all entirely client-side with persistent state stored in the browser.
+The app now supports player setup, turn ownership by round, ship placement for the selected user, and shot limits based on how many ships each player still has afloat.
 
----
+## What It Does
 
-## Overview
-
-This application allows you to:
-
-### Board & Rounds
-- Record shots on a 10×10 grid (columns 1–10, rows Alpha–Juliette).
-- Track shots by round (Round 1, 2, 3, ...).
-- Highlight shots from any combination of previous rounds.
-- Prevent targeting the same cell more than once.
-- Remove shots by clicking them again (if editing the active recording round).
-- Automatically persist state across page reloads.
+### Player Setup
+- Create a game with **2 to 6 players**.
+- Enter player names in **turn order**.
+- Mark exactly one player as **you**.
+- Only the first `N` player slots are active, so player selection stays contiguous.
+- Player names and the "This is me" choice are editable only during setup.
 
 ### Ship Placement
-- Place 5 ships before starting the game:
-  - **A** – Aircraft Carrier (5)
-  - **B** – Battleship (4)
-  - **C** – Cruiser (3)
-  - **D** – Destroyer (2)
-  - **S** – Submarine (1)
-- Ships may be placed:
-  - Horizontally
-  - Vertically
-  - Diagonally (both directions)
+- After setup, click **Next** to move to ship placement.
+- The selected user becomes the **board owner**.
+- Place the 5 ships on the 10x10 grid:
+  - **A** - Aircraft Carrier (5)
+  - **B** - Battleship (4)
+  - **C** - Cruiser (3)
+  - **D** - Destroyer (2)
+  - **S** - Submarine (1)
+- Ships can be placed horizontally, vertically, or diagonally.
 - Ships cannot overlap.
-- Ships may be repositioned before starting the game.
-- Ship cells display:
-  - Light green when intact
-  - Red when hit
+- A **Back** button returns to player setup.
+- **Start Game** becomes available once all ships are placed.
 
-### Main Player Automation
-- The top player represents the board owner.
-- Ship damage is automatically calculated based on recorded shots.
-- Damage inputs for this player are read-only.
-- Ship segments visually turn red when hit.
+### Turn And Round Tracking
+- Round 1 always belongs to **player 1**.
+- Each round is assigned to exactly one player.
+- The active round highlights that player in the player list.
+- The selected user keeps a distinct purple style, even when it is not their turn.
+- When a player's ships are all sunk, that player is skipped in later rounds.
 
-### Other Players
-- 5 additional players can be tracked.
-- Ship damage is recorded by clicking hit boxes.
-- Each click uses the active recording round number.
-- Hit boxes fill from left to right, even if a later box is clicked.
-- Clicking again removes the most recent hit recorded for the round currently being edited.
-- When all hit boxes for a ship are filled, it is visually marked as sunk.
+### Shot Recording
+- Shots are recorded on the main board by round number.
+- A player gets **one shot per active ship** they still have at the start of that round.
+- Example:
+  - 5 active ships = 5 shots that round
+  - 3 active ships = 3 shots that round
+- **Next Round** stays disabled until the current round has taken its full shot count.
+- You can still inspect and edit earlier rounds using the recording-round selector.
 
-### Data Persistence
+### Damage Tracking
+- The selected user's ship damage is **auto-calculated** from shots on the board.
+- Other players' ship damage is tracked manually through their hit boxes.
+- Hit boxes record the round number of the hit.
+- Fully filled ships are shown as sunk.
+
+### Layout
+- Player cards use a **wrapping flow layout**.
+- Cards are intentionally **narrower** and more compact so multiple cards can fit per row when space allows.
+
+### Persistence
 - All game state is stored in `localStorage`.
-- A **Clear All Data** button resets the game after confirmation.
+- **Clear All Data** resets the full game after confirmation.
+- Legacy saved data is migrated on a best-effort basis.
 
----
+## Running The App
 
-## Technology Stack
+This project is fully static:
 
-This application is intentionally simple and fully static.
-
-### Frontend
-- **React 18 (UMD build via CDN)**
-- **ReactDOM 18**
-- **Babel (in-browser JSX transpilation)**
-
-No build step or bundler is required.
-
-### Storage
-- Browser `localStorage`
-- Versioned state schema
-- Automatic persistence on state changes
-
-### Architecture
-- Single-page application
-- Pure client-side state management
-- Derived data for automatic ship damage computation
-- Deterministic rendering from normalized state model
-
----
-
-## Running the Application
-
-Because this is a static site:
-
-1. Place the files together:
+1. Keep these files together:
    - `index.html`
    - `styles.css`
    - `app.jsx`
 2. Open `index.html` in a modern browser.
 
-No server or build tooling required.
+No server or build tooling is required.
 
----
+## Tech Stack
 
-## Design Goals
+- React 18 via CDN
+- ReactDOM 18 via CDN
+- Babel standalone for in-browser JSX
+- Browser `localStorage` for persistence
 
-- Zero backend dependencies
-- Persistent state without accounts or databases
-- Clear round visualization
-- Minimal operational friction during live gameplay
-- Deterministic, repairable state model
+## Notes
 
----
-
-This tool is intended as a game-state recorder, not a rules engine. It tracks what happened — it does not enforce turn order, shot counts, or game logic beyond board occupancy.
+This tool records game state and enforces the app's round/shot bookkeeping. It is still a lightweight client-side recorder rather than a full Battleship rules engine.
