@@ -372,15 +372,32 @@ a { color: inherit; }
 }
 
 .hitInput {
-  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
   text-align: center;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.06);
   color: var(--text);
   border-radius: 6px;
-  /* padding: 7px 6px; */
+  padding: 0;
   font-weight: 800;
   letter-spacing: 0.3px;
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.hitInput:hover:not(:disabled) {
+  background: rgba(255,255,255,0.11);
+}
+
+.hitInput:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.hitInput.filled {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: rgba(125, 211, 252, 0.4);
 }
 
 .shipRow.sunk .hitBoxes::after {
@@ -395,6 +412,10 @@ a { color: inherit; }
   border-radius: 999px;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.25);
   pointer-events: none;
+}
+
+.hitInput:disabled {
+  cursor: default;
 }
 
 .footerNote {

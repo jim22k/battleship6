@@ -43,7 +43,10 @@ This application allows you to:
 
 ### Other Players
 - 5 additional players can be tracked.
-- Ship damage is manually entered (2-digit round numbers).
+- Ship damage is recorded by clicking hit boxes.
+- Each click uses the active recording round number.
+- Hit boxes fill from left to right, even if a later box is clicked.
+- Clicking again removes the most recent hit recorded for the round currently being edited.
 - When all hit boxes for a ship are filled, it is visually marked as sunk.
 
 ### Data Persistence

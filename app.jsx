@@ -142,6 +142,33 @@ function computeMainPlayerDamage(shipsPlaced, shotsByCell) {
   return damage;
 }
 
+function normalizeDamageTrack(track) {
+  const filled = track
+    .filter((v) => v !== "")
+    .sort((a, b) => Number(a) - Number(b));
+  return [...filled, ...Array(track.length - filled.length).fill("")];
+}
+
+function toggleDamageTrackHit(track, clickedIdx, roundNumber) {
+  const nextTrack = [...track];
+  const roundValue = String(roundNumber);
+  const clickedValue = nextTrack[clickedIdx];
+
+  if (clickedValue === "") {
+    const targetIdx = nextTrack.findIndex((v) => v === "");
+    if (targetIdx === -1) return nextTrack;
+    nextTrack[targetIdx] = roundValue;
+    return nextTrack;
+  }
+
+  const removableIdx = [...nextTrack].reverse().findIndex((v) => v === roundValue);
+  if (removableIdx === -1) return nextTrack;
+
+  const actualIdx = nextTrack.length - 1 - removableIdx;
+  nextTrack[actualIdx] = "";
+  return normalizeDamageTrack(nextTrack);
+}
+
 function tryLoadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -168,6 +195,15 @@ function tryLoadState() {
     if (!s.ui.placement) s.ui.placement = { selectedShip: "A", orientation: "H" };
 
     if (!Array.isArray(s.players) || s.players.length !== 6) s.players = makeDefaultPlayers();
+    s.players = s.players.map((p) => ({
+      ...p,
+      damage: Object.fromEntries(
+        Object.keys(SHIPS).map((letter) => [
+          letter,
+          normalizeDamageTrack(Array.isArray(p.damage?.[letter]) ? p.damage[letter] : Array(SHIPS[letter].length).fill("")),
+        ])
+      ),
+    }));
 
     // Rebuild shotsByCell from shotsByRound if needed/safer:
     // (authoritative: shotsByRound; but if empty and shotsByCell exists, keep)
@@ -481,17 +517,11 @@ function App() {
     });
   }
 
-  function updatePlayerDamage(idx, shipLetter, hitIdx, rawValue) {
-    // allow "" or 1-2 digits
-    let v = rawValue;
-    if (v.length > 2) v = v.slice(0, 2);
-    if (v !== "" && !/^\d{1,2}$/.test(v)) return;
-
+  function togglePlayerDamage(idx, shipLetter, hitIdx) {
     setState((prev) => {
       const players = prev.players.map((p, i) => {
         if (i !== idx) return p;
-        const damageShip = [...p.damage[shipLetter]];
-        damageShip[hitIdx] = v;
+        const damageShip = toggleDamageTrackHit(p.damage[shipLetter], hitIdx, prev.rounds.recording);
         return { ...p, damage: { ...p.damage, [shipLetter]: damageShip } };
       });
       return { ...prev, players };
@@ -656,8 +686,9 @@ function App() {
                   player={playerForRender}
                   isMainPlayer={isMain}
                   readOnlyDamage={isMain}
+                  recordingRound={state.rounds.recording}
                   onNameChange={(v) => updatePlayerName(idx, v)}
-                  onDamageChange={(ship, hitIdx, v) => updatePlayerDamage(idx, ship, hitIdx, v)}
+                  onDamageToggle={(ship, hitIdx) => togglePlayerDamage(idx, ship, hitIdx)}
                 />
               );
             })}
@@ -763,7 +794,7 @@ function BoardGrid({
   );
 }
 
-function PlayerCard({ idx, player, isMainPlayer, readOnlyDamage, onNameChange, onDamageChange }) {
+function PlayerCard({ idx, player, isMainPlayer, readOnlyDamage, recordingRound, onNameChange, onDamageToggle }) {
   const sunk = (shipLetter) => {
     const arr = player.damage[shipLetter] || [];
     return arr.length > 0 && arr.every((v) => v !== "");
@@ -788,24 +819,23 @@ function PlayerCard({ idx, player, isMainPlayer, readOnlyDamage, onNameChange, o
           </div>
           <div className="hitBoxes">
             {player.damage[letter].map((val, i) => (
-              <input
+              <button
                 key={`${letter}-${i}`}
-                className="hitInput"
-                inputMode="numeric"
-                pattern="\d*"
-                placeholder="__"
-                value={val}
-                readOnly={!!readOnlyDamage}
-                onChange={(e) => {
+                type="button"
+                className={`hitInput ${val !== "" ? "filled" : ""}`}
+                disabled={!!readOnlyDamage}
+                onClick={() => {
                   if (readOnlyDamage) return;
-                  onDamageChange(letter, i, e.target.value);
+                  onDamageToggle(letter, i);
                 }}
                 title={
                   readOnlyDamage
                     ? `${letter} hits (auto-calculated)`
-                    : `${letter} hit ${i + 1} (2 digits)`
+                    : `${letter} hit ${i + 1} • click to mark/unmark round ${recordingRound}`
                 }
-              />
+              >
+                {val || ""}
+              </button>
             ))}
           </div>
         </div>
