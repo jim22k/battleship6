@@ -865,9 +865,10 @@ function App() {
   const recordingPlayer = activePlayers.find((player) => player.id === recordingPlayerId) || null;
   const boardOwnerPlayer = activePlayers.find((player) => player.id === boardOwnerId) || null;
   const nextRoundPlayer = activePlayers.find((player) => player.id === nextRoundPlayerId) || null;
+  const playerLayoutClass = activePlayers.length <= 3 ? "compactPlayers" : "crowdedPlayers";
 
   return (
-    <div className="app">
+    <div className={`app ${playerLayoutClass}`}>
       <div className="topbar">
         {state.mode === MODES.SETUP_PLAYERS ? (
           <div className="controls">
@@ -1047,7 +1048,7 @@ function App() {
           </div>
         </div>
       ) : (
-        <div className="main">
+        <div className={`main ${playerLayoutClass}`}>
           <div className="card">
             <div className="gridWrap">
               {state.mode === MODES.RECORD_SHOTS ? (

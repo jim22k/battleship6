@@ -30,9 +30,13 @@ a {
 }
 
 .app {
-  max-width: 1400px;
+  max-width: 1500px;
   margin: 0 auto;
   padding: 16px;
+}
+
+.app.crowdedPlayers {
+  max-width: 1900px;
 }
 
 .topbar {
@@ -137,7 +141,7 @@ a {
 .main {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -145,9 +149,26 @@ a {
   grid-template-columns: minmax(0, 1fr);
 }
 
-@media (max-width: 1100px) {
-  .main {
-    grid-template-columns: minmax(0, 1fr);
+@media (min-width: 1200px) {
+  .main.compactPlayers {
+    grid-template-columns: minmax(0, 1fr) clamp(240px, 24vw, 320px);
+  }
+
+  .main.compactPlayers .players {
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  .main.compactPlayers .playerCard {
+    width: 100%;
+    max-width: none;
+    flex: 0 0 auto;
+  }
+}
+
+@media (min-width: 1500px) {
+  .main.crowdedPlayers {
+    grid-template-columns: minmax(0, 1fr) clamp(470px, 34vw, 640px);
   }
 }
 
@@ -418,9 +439,9 @@ a {
 }
 
 .playerCard {
-  flex: 1 1 240px;
+  flex: 1 1 200px;
   max-width: 300px;
-  min-width: 220px;
+  min-width: 200px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
   border-radius: 14px;
