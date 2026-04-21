@@ -160,9 +160,7 @@ a {
   }
 
   .main.compactPlayers .playerCard {
-    width: 100%;
-    max-width: none;
-    flex: 0 0 auto;
+    flex: 0 0 218px;
   }
 }
 
@@ -439,9 +437,11 @@ a {
 }
 
 .playerCard {
-  flex: 1 1 200px;
-  max-width: 300px;
-  min-width: 200px;
+  flex: 0 0 218px;
+  width: 218px;
+  height: 227px;
+  max-width: 218px;
+  min-width: 218px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
   border-radius: 14px;
@@ -577,8 +577,7 @@ a {
   }
 
   .playerCard {
-    flex-basis: 100%;
-    max-width: none;
+    flex: 0 0 218px;
   }
 
   .badge {
