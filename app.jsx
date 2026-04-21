@@ -898,7 +898,7 @@ function App() {
               >
                 {Object.keys(SHIPS).map((letter) => (
                   <option key={letter} value={letter}>
-                    {letter} ({SHIPS[letter].length})
+                    {letter} = {SHIPS[letter].name} ({SHIPS[letter].length})
                   </option>
                 ))}
               </select>
@@ -1015,8 +1015,7 @@ function App() {
           <div className="card setupCard">
             <h2>Game Setup</h2>
             <p className="setupIntro">
-              Enter the players in turn order, then mark which one is you. Only the first {state.setup.playerCount} player
-              slots are active for this game, and player names are locked once you continue.
+              Enter the players in turn order, then mark which one is you.
             </p>
 
             <div className="setupPlayers">
@@ -1040,10 +1039,6 @@ function App() {
                   </label>
                 </div>
               ))}
-            </div>
-
-            <div className="footerNote">
-              The selected player becomes the board owner for ship placement and automatic damage tracking.
             </div>
           </div>
         </div>
@@ -1076,7 +1071,7 @@ function App() {
                 </div>
               ) : (
                 <div className="helperText">
-                  Place the ships for {getPlayerDisplayName(boardOwnerPlayer, activePlayers.indexOf(boardOwnerPlayer))} before starting the game.
+                  Place your ships before starting the game.
                 </div>
               )}
 
@@ -1115,12 +1110,6 @@ function App() {
                 />
               ))}
             </div>
-
-            {state.mode === MODES.RECORD_SHOTS ? (
-              <div className="footerNote">
-                Purple marks you. Yellow marks the player whose turn owns the currently selected recording round.
-              </div>
-            ) : null}
           </div>
         </div>
       )}
