@@ -10,6 +10,9 @@
   --warning: #facc15;
   --user-bg: rgba(88, 28, 135, 0.35);
   --user-border: rgba(168, 85, 247, 0.85);
+  --board-label-width: 84px;
+  --board-tile-size: 44px;
+  --board-gap: 6px;
 }
 
 * {
@@ -22,7 +25,7 @@ body {
     "Segoe UI Emoji";
   background: radial-gradient(1200px 800px at 20% 0%, #1a2250 0%, var(--bg) 55%);
   color: var(--text);
-  min-width: 0;
+  min-width: 635px;
 }
 
 a {
@@ -149,24 +152,46 @@ a {
   grid-template-columns: minmax(0, 1fr);
 }
 
-@media (min-width: 1200px) {
-  .main.compactPlayers {
-    grid-template-columns: minmax(0, 1fr) clamp(240px, 24vw, 320px);
+@media (min-width: 900px) {
+  .main.crowdedPlayers {
+    grid-template-columns: minmax(0, 1fr) clamp(240px, 24vw, 700px);
+    align-items: start;
   }
 
-  .main.compactPlayers .players {
-    flex-direction: column;
-    flex-wrap: nowrap;
+  .main.crowdedPlayers .playersCard {
+    overflow-y: auto;
   }
 
-  .main.compactPlayers .playerCard {
-    flex: 0 0 218px;
+  .main.crowdedPlayers .players {
+    display: grid;
+    grid-template-columns: 218px;
+    align-content: start;
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .main.crowdedPlayers .playerCard {
+    flex: 0 0 auto;
   }
 }
 
-@media (min-width: 1470px) {
+@media (min-width: 1130px) {
   .main.crowdedPlayers {
-    grid-template-columns: minmax(0, 1fr) clamp(470px, 34vw, 640px);
+    grid-template-columns: minmax(0, 1fr) clamp(470px, 34vw, 700px);
+  }
+
+  .main.crowdedPlayers .players {
+    grid-template-columns: repeat(2, 218px);
+  }
+}
+
+@media (min-width: 1345px) {
+  .main.crowdedPlayers {
+    grid-template-columns: minmax(0, 1fr) clamp(690px, 48vw, 960px);
+  }
+
+  .main.crowdedPlayers .players {
+    grid-template-columns: repeat(3, 218px);
   }
 }
 
@@ -204,11 +229,13 @@ a {
 }
 
 .grid {
-  display: grid;
-  grid-template-columns: 100px repeat(10, minmax(44px, 1fr));
-  gap: 6px;
+  display: inline-grid;
+  grid-template-columns: var(--board-label-width) repeat(10, var(--board-tile-size));
+  gap: var(--board-gap);
   align-items: stretch;
-  min-width: 680px;
+  width: max-content;
+  min-width: max-content;
+  max-width: max-content;
 }
 
 .colHeader {
@@ -227,7 +254,7 @@ a {
   align-items: center;
   justify-content: flex-start;
   padding: 0 10px;
-  height: 54px;
+  height: var(--board-tile-size);
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
@@ -239,7 +266,9 @@ a {
 
 .cell {
   position: relative;
-  height: 54px;
+  width: var(--board-tile-size);
+  height: var(--board-tile-size);
+  aspect-ratio: 1 / 1;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);

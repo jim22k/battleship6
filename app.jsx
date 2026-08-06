@@ -467,6 +467,8 @@ function findNextEligiblePlayerId({ roundNumber, currentPlayerId, activePlayers,
 function App() {
   const [state, setState] = React.useState(() => tryLoadState() ?? makeInitialState());
   const [hoverCell, setHoverCell] = React.useState(null);
+  const [playersPanelMaxHeight, setPlayersPanelMaxHeight] = React.useState(null);
+  const boardCardRef = React.useRef(null);
 
   useDebouncedEffect(
     () => {
@@ -865,7 +867,40 @@ function App() {
   const recordingPlayer = activePlayers.find((player) => player.id === recordingPlayerId) || null;
   const boardOwnerPlayer = activePlayers.find((player) => player.id === boardOwnerId) || null;
   const nextRoundPlayer = activePlayers.find((player) => player.id === nextRoundPlayerId) || null;
-  const playerLayoutClass = activePlayers.length <= 3 ? "compactPlayers" : "crowdedPlayers";
+  const playerLayoutClass = "crowdedPlayers";
+  const playersCardStyle = playersPanelMaxHeight != null ? { maxHeight: `${playersPanelMaxHeight}px` } : undefined;
+
+  React.useLayoutEffect(() => {
+    if (state.mode === MODES.SETUP_PLAYERS) {
+      setPlayersPanelMaxHeight(null);
+      return undefined;
+    }
+
+    const boardCard = boardCardRef.current;
+    if (!boardCard) return undefined;
+
+    const updatePlayersPanelHeight = () => {
+      if (window.innerWidth < 900) {
+        setPlayersPanelMaxHeight(null);
+        return;
+      }
+
+      const nextHeight = Math.round(boardCard.getBoundingClientRect().height);
+      setPlayersPanelMaxHeight((prev) => (prev === nextHeight ? prev : nextHeight));
+    };
+
+    updatePlayersPanelHeight();
+
+    const resizeObserver =
+      typeof ResizeObserver === "function" ? new ResizeObserver(updatePlayersPanelHeight) : null;
+    resizeObserver?.observe(boardCard);
+    window.addEventListener("resize", updatePlayersPanelHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updatePlayersPanelHeight);
+    };
+  }, [state.mode]);
 
   return (
     <div className={`app ${playerLayoutClass}`}>
@@ -1044,7 +1079,7 @@ function App() {
         </div>
       ) : (
         <div className={`main ${playerLayoutClass}`}>
-          <div className="card">
+          <div className="card boardCard" ref={boardCardRef}>
             <div className="gridWrap">
               {state.mode === MODES.RECORD_SHOTS ? (
                 <div className="recordingSummary">
@@ -1091,7 +1126,7 @@ function App() {
             </div>
           </div>
 
-          <div className="card">
+          <div className="card playersCard" style={playersCardStyle}>
             <h2>Players</h2>
             <div className="players">
               {activePlayers.map((player, idx) => (
