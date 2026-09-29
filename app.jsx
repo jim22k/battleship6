@@ -1193,6 +1193,7 @@ function BoardGrid({
               const ship = shipsByCell[id];
               const isPreview = mode === MODES.PLACE_SHIPS && previewSet.has(id);
               const isHighlighted = shotRound != null && highlights.has(Number(shotRound));
+              const isActiveRoundShot = shotRound != null && Number(shotRound) === Number(recordingRound);
               const highlightColor = isHighlighted ? colorForRound(Number(shotRound)) : null;
               const canRemove =
                 mode === MODES.RECORD_SHOTS && shotRound != null && Number(shotRound) === Number(recordingRound);
@@ -1230,6 +1231,8 @@ function BoardGrid({
                       }}
                     />
                   ) : null}
+
+                  {isActiveRoundShot ? <div className="activeRoundOverlay" /> : null}
 
                   {isPreview ? (
                     previewValid ? <div className="previewOverlay" /> : <div className="invalidPreviewOverlay" />
@@ -1273,7 +1276,7 @@ function PlayerCard({ idx, player, isUserPlayer, isActivePlayer, damageEditable,
               <button
                 key={`${letter}-${hitIdx}`}
                 type="button"
-                className={`hitInput ${value !== "" ? "filled" : ""}`}
+                className={`hitInput ${value !== "" ? "filled" : ""} ${value !== "" && Number(value) === Number(recordingRound) ? "activeRoundHit" : ""}`}
                 disabled={!damageEditable}
                 onClick={() => {
                   if (!damageEditable) return;
