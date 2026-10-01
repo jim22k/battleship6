@@ -468,6 +468,7 @@ function App() {
   const [state, setState] = React.useState(() => tryLoadState() ?? makeInitialState());
   const [hoverCell, setHoverCell] = React.useState(null);
   const [playersPanelMaxHeight, setPlayersPanelMaxHeight] = React.useState(null);
+  const [showShips, setShowShips] = React.useState(false);
   const boardCardRef = React.useRef(null);
 
   useDebouncedEffect(
@@ -560,6 +561,16 @@ function App() {
     () => getRoundPlayerId(currentRound, state.rounds, activePlayers),
     [currentRound, state.rounds, activePlayers]
   );
+
+  const shipsRevealed = state.mode !== MODES.RECORD_SHOTS || showShips;
+  const isUserTurn = state.mode === MODES.RECORD_SHOTS && recordingPlayerId === boardOwnerId;
+  const revealedShipCells = React.useMemo(() => {
+    const ids = new Set();
+    if (!isUserTurn) return ids;
+    if (hoverCell) ids.add(hoverCell.id);
+    for (const id of getRoundShots(state.shotsByRound, recordingRound)) ids.add(id);
+    return ids;
+  }, [isUserTurn, hoverCell, state.shotsByRound, recordingRound]);
 
   const recordingRoundShots = getRoundShots(state.shotsByRound, recordingRound).length;
   const currentRoundShots = getRoundShots(state.shotsByRound, currentRound).length;
@@ -1119,6 +1130,8 @@ function App() {
                 recordingRound={recordingRound}
                 recordingShotLimit={recordingShotLimit}
                 recordingRoundShots={recordingRoundShots}
+                shipsRevealed={shipsRevealed}
+                revealedShipCells={revealedShipCells}
                 onCellClick={handleCellClick}
                 onCellHover={handleCellHover}
                 onCellLeave={clearHover}
@@ -1140,6 +1153,9 @@ function App() {
                   isUserPlayer={player.id === boardOwnerId}
                   isActivePlayer={player.id === recordingPlayerId}
                   damageEditable={state.mode === MODES.RECORD_SHOTS && player.id !== boardOwnerId}
+                  shipsRevealed={state.mode === MODES.RECORD_SHOTS ? shipsRevealed : true}
+                  shipToggleVisible={state.mode === MODES.RECORD_SHOTS && player.id === boardOwnerId}
+                  onToggleShips={() => setShowShips((prev) => !prev)}
                   recordingRound={recordingRound}
                   onDamageToggle={(ship, hitIdx) => togglePlayerDamage(idx, ship, hitIdx)}
                 />
@@ -1161,6 +1177,8 @@ function BoardGrid({
   recordingRound,
   recordingShotLimit,
   recordingRoundShots,
+  shipsRevealed,
+  revealedShipCells,
   onCellClick,
   onCellHover,
   onCellLeave,
@@ -1191,6 +1209,9 @@ function BoardGrid({
               const id = cellId(r, c);
               const shotRound = shotsByCell[id];
               const ship = shipsByCell[id];
+              const shipVisible =
+                mode !== MODES.RECORD_SHOTS || shipsRevealed || revealedShipCells.has(id);
+              const visibleShip = shipVisible ? ship : null;
               const isPreview = mode === MODES.PLACE_SHIPS && previewSet.has(id);
               const isHighlighted = shotRound != null && highlights.has(Number(shotRound));
               const isActiveRoundShot = shotRound != null && Number(shotRound) === Number(recordingRound);
@@ -1200,7 +1221,7 @@ function BoardGrid({
               const shotQuotaReached = mode === MODES.RECORD_SHOTS && shotRound == null && recordingRoundShots >= recordingShotLimit;
 
               const titleParts = [`${ROW_WORDS[r]}-${c}`];
-              if (ship) titleParts.push(`Ship: ${ship}`);
+              if (visibleShip) titleParts.push(`Ship: ${visibleShip}`);
               if (shotRound != null) titleParts.push(`Shot: round ${shotRound}`);
               if (mode === MODES.RECORD_SHOTS && shotRound != null) {
                 titleParts.push(canRemove ? "Click to remove (recording round)" : "Locked (different round)");
@@ -1220,7 +1241,7 @@ function BoardGrid({
                   onClick={() => onCellClick(r, c)}
                   onMouseEnter={() => onCellHover(r, c)}
                 >
-                  {ship ? <div className={`shipMark ${shotRound != null ? "hit" : ""}`}>{ship}</div> : null}
+                  {visibleShip ? <div className={`shipMark ${shotRound != null ? "hit" : ""}`}>{visibleShip}</div> : null}
                   {shotRound != null ? <div className="shotNumber">{shotRound}</div> : null}
 
                   {isHighlighted ? (
@@ -1254,7 +1275,39 @@ function BoardGrid({
   );
 }
 
-function PlayerCard({ idx, player, isUserPlayer, isActivePlayer, damageEditable, recordingRound, onDamageToggle }) {
+function ShipVisibilityToggle({ revealed, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={`shipToggle ${revealed ? "on" : ""}`}
+      onClick={onToggle}
+      aria-pressed={revealed}
+      aria-label={revealed ? "Hide your ships" : "Show your ships"}
+      title={revealed ? "Hide your ships" : "Show your ships"}
+    >
+      <svg className="shipToggleIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <g className="shipToggleGlyph">
+          <path d="M1.6 12S5.7 4.6 12 4.6 22.4 12 22.4 12 18.3 19.4 12 19.4 1.6 12 1.6 12Z" />
+          <circle cx="12" cy="12" r="3.1" />
+        </g>
+        {revealed ? null : <line className="shipToggleSlash" x1="4.2" y1="19.8" x2="19.8" y2="4.2" />}
+      </svg>
+    </button>
+  );
+}
+
+function PlayerCard({
+  idx,
+  player,
+  isUserPlayer,
+  isActivePlayer,
+  damageEditable,
+  shipToggleVisible,
+  shipsRevealed,
+  onToggleShips,
+  recordingRound,
+  onDamageToggle,
+}) {
   const sunk = (shipLetter) => {
     const arr = player.damage[shipLetter] || [];
     return arr.length > 0 && arr.every((value) => value !== "");
@@ -1296,6 +1349,8 @@ function PlayerCard({ idx, player, isUserPlayer, isActivePlayer, damageEditable,
           </div>
         </div>
       ))}
+
+      {shipToggleVisible ? <ShipVisibilityToggle revealed={shipsRevealed} onToggle={onToggleShips} /> : null}
     </div>
   );
 }

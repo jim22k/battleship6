@@ -474,6 +474,7 @@ a {
 }
 
 .playerCard {
+  position: relative;
   flex: 0 0 218px;
   width: 218px;
   height: 227px;
@@ -602,6 +603,57 @@ a {
 
 .footerNote {
   margin-top: 10px;
+}
+
+.shipToggle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease;
+}
+
+.shipToggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+
+.shipToggle:active {
+  transform: translateY(1px);
+}
+
+.shipToggle.on {
+  color: rgba(223, 197, 247, 0.95);
+  border-color: var(--user-border);
+  background: rgba(88, 28, 135, 0.35);
+}
+
+.shipToggleIcon {
+  width: 21px;
+  height: 21px;
+  display: block;
+}
+
+.shipToggleGlyph {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+
+.shipToggleSlash {
+  stroke: var(--danger);
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 
 @media (max-width: 720px) {

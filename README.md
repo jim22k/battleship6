@@ -49,6 +49,16 @@ The app now supports player setup, turn ownership by round, ship placement for t
 - Hit boxes record the round number of the hit.
 - Fully filled ships are shown as sunk.
 
+### Ship Concealment
+- Once **Start Game** is pressed, your ships are **hidden by default** so nobody glancing at your screen can read your fleet.
+- Ships are still fully visible during setup and placement, where you need them.
+- Your ships reappear in three cases only:
+  1. **On your turn**, hovering a cell that contains one of your own ships reveals just that ship (including whether it has been hit). Moving the mouse away hides it again.
+  2. **On your turn**, any shot you record this round reveals the ship under it, so tap-only devices can shoot a cell, look, and tap again to undo the shot.
+  3. **The ship toggle** in the bottom-right corner of your player card shows or hides all of your ships at once.
+- The toggle shows an eye while your ships are visible, and a crossed-out eye while they are hidden.
+- The toggle is intentionally **not persisted**, so ships are always hidden again after a reload.
+
 ### Layout
 - Player cards use a **wrapping flow layout**.
 - Cards are intentionally **narrower** and more compact so multiple cards can fit per row when space allows.
